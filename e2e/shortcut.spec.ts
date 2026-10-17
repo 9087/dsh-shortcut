@@ -28,16 +28,27 @@ import {
 } from './helpers/host.ts'
 import { beginSession, dismissNotices, newGuiPage } from './helpers/gui.ts'
 
+/** The fixture's UI language. `E2E_LOCALE=en` also produces the English screenshots. */
+const LOCALE: 'zh' | 'en' = process.env.E2E_LOCALE === 'en' ? 'en' : 'zh'
+/** Screenshot-name suffix, so the English set never overwrites the Chinese one. */
+const SHOTS_SUFFIX = process.env.E2E_SHOTS_SUFFIX ?? (LOCALE === 'en' ? '.en' : '')
+
 /** The text captured from a bubble and later delivered by the menu. */
-const CAPTURE_TEXT = '重启服务：请重启 dev 服务'
+const CAPTURE_TEXT = LOCALE === 'en' ? 'Restart the dev service' : '重启服务：请重启 dev 服务'
+/** A substring of CAPTURE_TEXT that identifies that session in the sidebar. */
+const CAPTURE_PROBE = LOCALE === 'en' ? 'Restart the dev service' : '请重启 dev 服务'
 /** The second session's own message; used to prove the view did not switch. */
-const OTHER_TEXT = '这是第二个会话的消息'
+const OTHER_TEXT = LOCALE === 'en' ? 'This is the second session message' : '这是第二个会话的消息'
+/** A substring of OTHER_TEXT that identifies that session in the sidebar. */
+const OTHER_PROBE = LOCALE === 'en' ? 'second session message' : '第二个会话的消息'
 /** The name typed into the capture dialog. */
-const SHORTCUT_NAME = '重启服务'
+const SHORTCUT_NAME = LOCALE === 'en' ? 'Restart service' : '重启服务'
 /** The renamed record after the Settings edit. */
-const RENAMED = '重启服务（已改名）'
+const RENAMED = LOCALE === 'en' ? 'Restart service (renamed)' : '重启服务（已改名）'
 /** A record created from the Settings page by hand. */
-const MANUAL_NAME = '手动添加'
+const MANUAL_NAME = LOCALE === 'en' ? 'Added manually' : '手动添加'
+/** The content of that manual record. */
+const MANUAL_TEXT = LOCALE === 'en' ? 'Typed by hand' : '手动输入的内容'
 /** The injected button's accessible name, in either UI language. */
 const ADD_LABEL = /加入快捷方式|Add to shortcuts/
 /** A delivery banner, in either UI language. */
@@ -63,7 +74,7 @@ async function shoot(name: string, options: { clip?: { x: number; y: number; wid
   const directory = join('docs', 'images')
   mkdirSync(directory, { recursive: true })
   await page.screenshot({
-    path: join(directory, name),
+    path: join(directory, name.replace(/\.png$/, `${SHOTS_SUFFIX}.png`)),
     ...(options.clip === undefined ? { fullPage: false } : { clip: options.clip }),
   })
 }
@@ -78,12 +89,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
       return
     }
     browser = launched
-    fixture = makeFixture('shortcut')
+    fixture = makeFixture('shortcut', LOCALE)
     await bootstrapHome(dsh, fixture)
     // The bootstrap's own first boot may persist its defaults into the home;
     // pin the language again before the measured boot so the labels this suite
     // asserts are the ones it wrote (both languages are still matched below).
-    writeFileSync(join(fixture.home, 'settings.yaml'), 'locale:\n  preference: zh\n')
+    writeFileSync(join(fixture.home, 'settings.yaml'), `locale:\n  preference: ${LOCALE}\n`)
     host = await startHost(dsh, fixture.home, fixture.workspace, fixture.logFile)
     page = await newGuiPage(browser)
     page.on('pageerror', error => { console.log('[pageerror]', error.message) })
@@ -213,14 +224,14 @@ test.describe('dsh-shortcut (real Chromium)', () => {
 
     // The ORIGINAL session now holds a second copy of the delivered message.
     // (The sidebar title is that session's first message.)
-    const originalRow = page.getByRole('treeitem').filter({ hasText: '请重启 dev 服务' }).first()
+    const originalRow = page.getByRole('treeitem').filter({ hasText: CAPTURE_PROBE }).first()
     await expect(originalRow).toBeVisible({ timeout: 15_000 })
     await originalRow.click()
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 15_000 })
 
     // And the session the reader was in received nothing.
-    const secondRow = page.getByRole('treeitem').filter({ hasText: '第二个会话的消息' }).first()
+    const secondRow = page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first()
     await secondRow.click()
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(1)
@@ -252,7 +263,7 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await name.fill(MANUAL_NAME)
     await page.locator('[data-dsh-shortcut-session-picker]').click()
     await page.getByRole('menuitem').first().click()
-    await page.locator('[data-dsh-shortcut-text]').fill('手动输入的内容')
+    await page.locator('[data-dsh-shortcut-text]').fill(MANUAL_TEXT)
     await expect(confirm).toBeEnabled()
     await confirm.click()
     await expect(page.locator('[data-dsh-shortcut-row]')).toHaveCount(2, { timeout: 10_000 })

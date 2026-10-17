@@ -50,7 +50,11 @@ $env:DSH_BIN = 'C:\Users\吴志伟\AppData\Local\npm-cache\_npx\b86ed90107c62dab
 pnpm run e2e
 ```
 
-`E2E_TIMING=1` prints phase timings. `E2E_SCREENSHOTS=1` also writes the documentation screenshots under `docs/images/`.
+`E2E_TIMING=1` prints phase timings. `E2E_SCREENSHOTS=1` also writes the documentation
+screenshots under `docs/images/`; `E2E_LOCALE=en` runs the same story against an English GUI and
+(together with `E2E_SCREENSHOTS=1`) writes the `*.en.png` set used by [README.md](README.md), while
+the default Chinese run writes the set used by [README.zh.md](README.zh.md). All assertions accept
+either language, so neither README's picture set depends on which one a run happened to use.
 
 What it asserts: plugin activation (its own DOM, plus no `startup failed:` in the host log); the sidebar trigger sits above Settings; the bubble button is immediately left of copy; the capture dialog is seeded from the bubble and stores the record; the menu delivers into the original session while the page stays on another session (the target's transcript gains a message, the current one does not); Settings edit/add/delete; records survive a host restart.
 
