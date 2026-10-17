@@ -1,0 +1,6 @@
+# dsh-shortcut bundle patch: the row that mounts the shortcut plugin into every
+# profile that lists this bundle. Applied as a bundle layer (before the
+# profile's own cordis.patch.yml).
+- insert:
+    - id: shortcut
+      name: dsh-shortcut

@@ -1,0 +1,224 @@
+/**
+ * Durable shortcut records on the host.
+ *
+ * One file (`<DSH_HOME>/shortcut/entries.json`), written atomically, read
+ * once per process and kept in memory afterwards. Mutations are serialized so
+ * two browser tabs cannot interleave a read-modify-write, and a failed write
+ * leaves both the disk and the in-memory list at their previous state.
+ *
+ * A corrupt or unreadable file is a REPORTED failure (`store-unavailable`)
+ * rather than an empty list: silently answering "no shortcuts" would invite
+ * the reader to re-add everything on top of a file that is merely malformed,
+ * and the next write would overwrite it.
+ *
+ * @module dsh-shortcut/store
+ */
+
+import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { writeJsonAtomic } from './atomic-write.ts'
+import { validateDraft } from './share.ts'
+import { STORE_VERSION } from './types.ts'
+import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutFile } from './types.ts'
+import type { ShortcutErrorCode } from './types.ts'
+
+/** A business failure the channel turns into a structured RPC error. */
+export class StoreFailure extends Error {
+  readonly code: ShortcutErrorCode
+
+  /**
+   * @param code - the caller-facing failure kind.
+   * @param message - host-language detail.
+   */
+  constructor(code: ShortcutErrorCode, message: string) {
+    super(message)
+    this.name = 'StoreFailure'
+    this.code = code
+  }
+}
+
+/** `$DSH_HOME/shortcut`, falling back to `~/.dsh/shortcut` when the var is absent. */
+export function defaultShortcutDir(): string {
+  const home = process.env.DSH_HOME?.trim()
+  return join(home === undefined || home.length === 0 ? join(homedir(), '.dsh') : home, 'shortcut')
+}
+
+/** Whether a parsed value is one we can serve. */
+function isEntry(value: unknown): value is ShortcutEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  return typeof row.id === 'string' && row.id.length > 0
+    && typeof row.name === 'string'
+    && typeof row.sessionId === 'string'
+    && typeof row.text === 'string'
+    && typeof row.createdAt === 'number'
+    && typeof row.updatedAt === 'number'
+}
+
+/** Parse the file's bytes into records, or say why it cannot be trusted. */
+function parseFile(text: string): ShortcutEntry[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new StoreFailure('store-unavailable', 'entries.json is not valid JSON')
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new StoreFailure('store-unavailable', 'entries.json is not a shortcut file')
+  }
+  const file = parsed as Partial<ShortcutFile>
+  if (file.version !== STORE_VERSION) {
+    throw new StoreFailure('store-unavailable', `entries.json has unsupported version ${String(file.version)}`)
+  }
+  if (!Array.isArray(file.entries) || !file.entries.every(isEntry)) {
+    throw new StoreFailure('store-unavailable', 'entries.json has malformed entries')
+  }
+  return file.entries.map(entry => ({ ...entry }))
+}
+
+/** The host-side record store. */
+export class ShortcutStore {
+  private readonly file: string
+  private entries: ShortcutEntry[] | undefined
+  private loading: Promise<ShortcutEntry[]> | undefined
+  private queue: Promise<unknown> = Promise.resolve()
+
+  /**
+   * @param directory - the state directory that holds `entries.json`.
+   */
+  constructor(directory: string) {
+    this.file = join(directory, 'entries.json')
+  }
+
+  /** The file this store owns (for logs and tests). */
+  get path(): string {
+    return this.file
+  }
+
+  /** Load once; a failure is retried on the next call so a repaired file recovers. */
+  private load(): Promise<ShortcutEntry[]> {
+    if (this.entries !== undefined) return Promise.resolve(this.entries)
+    this.loading ??= (async () => {
+      try {
+        const text = await readFile(this.file, 'utf8')
+        this.entries = parseFile(text)
+        return this.entries
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          this.entries = []
+          return this.entries
+        }
+        this.loading = undefined
+        throw error instanceof StoreFailure ? error : new StoreFailure('store-unavailable', String(error))
+      }
+    })()
+    return this.loading
+  }
+
+  /** Serialize one read-modify-write: the write lands before the memory moves. */
+  private async mutate<T>(operation: (entries: ShortcutEntry[]) => Promise<T>): Promise<T> {
+    const previous = this.queue
+    const run = (async () => {
+      await previous.catch(() => {})
+      const entries = await this.load()
+      return operation(entries)
+    })()
+    this.queue = run.catch(() => {})
+    return run
+  }
+
+  /** Replace the file, then the in-memory list. A failed write changes nothing. */
+  private async persist(next: ShortcutEntry[]): Promise<void> {
+    const file: ShortcutFile = { version: STORE_VERSION, entries: next }
+    try {
+      await writeJsonAtomic(this.file, file)
+    } catch (error: unknown) {
+      throw new StoreFailure('store-unavailable', `writing ${this.file} failed: ${String(error)}`)
+    }
+    this.entries = next
+  }
+
+  /**
+   * Read every record, in insertion order.
+   * @returns a defensive copy.
+   */
+  async list(): Promise<ShortcutEntry[]> {
+    const entries = await this.load()
+    return entries.map(entry => ({ ...entry }))
+  }
+
+  /**
+   * Read one record.
+   * @param id - record identity.
+   * @returns the record, or undefined when it is gone.
+   */
+  async get(id: string): Promise<ShortcutEntry | undefined> {
+    const entries = await this.load()
+    const found = entries.find(entry => entry.id === id)
+    return found === undefined ? undefined : { ...found }
+  }
+
+  /**
+   * Append one record.
+   * @param draft - raw dialog values.
+   * @returns the stored record.
+   */
+  async create(draft: ShortcutDraft): Promise<ShortcutEntry> {
+    return this.mutate(async (entries) => {
+      const checked = validateDraft(entries, draft)
+      if (!checked.ok) {
+        throw new StoreFailure(checked.problem, checked.problem === 'name-taken'
+          ? `a shortcut named ${draft.name.trim()} already exists`
+          : 'name, session and text are required')
+      }
+      const now = Date.now()
+      const entry: ShortcutEntry = {
+        id: randomUUID(),
+        name: checked.draft.name,
+        sessionId: checked.draft.sessionId,
+        text: checked.draft.text,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await this.persist([...entries, entry])
+      return { ...entry }
+    })
+  }
+
+  /**
+   * Replace one record's fields.
+   * @param edit - identity plus the replacement draft.
+   * @returns the stored record.
+   */
+  async update(edit: ShortcutEdit): Promise<ShortcutEntry> {
+    return this.mutate(async (entries) => {
+      const index = entries.findIndex(entry => entry.id === edit.id)
+      if (index < 0) throw new StoreFailure('not-found', `no shortcut with id ${edit.id}`)
+      const checked = validateDraft(entries, edit.draft, edit.id)
+      if (!checked.ok) {
+        throw new StoreFailure(checked.problem, checked.problem === 'name-taken'
+          ? `a shortcut named ${edit.draft.name.trim()} already exists`
+          : 'name, session and text are required')
+      }
+      const existing = entries[index]
+      if (existing === undefined) throw new StoreFailure('not-found', `no shortcut with id ${edit.id}`)
+      const updated: ShortcutEntry = { ...existing, ...checked.draft, updatedAt: Date.now() }
+      const next = entries.map(entry => entry.id === edit.id ? updated : entry)
+      await this.persist(next)
+      return { ...updated }
+    })
+  }
+
+  /**
+   * Drop one record.
+   * @param id - record identity.
+   */
+  async remove(id: string): Promise<void> {
+    await this.mutate(async (entries) => {
+      if (!entries.some(entry => entry.id === id)) throw new StoreFailure('not-found', `no shortcut with id ${id}`)
+      await this.persist(entries.filter(entry => entry.id !== id))
+    })
+  }
+}
