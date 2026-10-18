@@ -18,16 +18,21 @@
 
 ## Local gate (must be green)
 
-```powershell
+```sh
 pnpm run typecheck
 pnpm test
 pnpm run build
-$env:DSH_BIN = 'C:\Users\吴志伟\AppData\Local\npm-cache\_npx\b86ed90107c62dab\node_modules\@deepseek-ai\dsh\lib\bin.js'
-pnpm run e2e
+pnpm run e2e        # only where a local dsh and a real model API key exist
 npm pack --dry-run
 ```
 
 `npm pack --dry-run` must list `lib/index.js`, `lib/client.js`, `lib/types/**`, `cordis.patch.yml` and `package.json`. Those are the files the loader opens.
+
+`pnpm run e2e` is the mount proof. `e2e/helpers/host.ts` creates a throwaway
+`DSH_HOME` with `mkdtempSync(join(tmpdir(), 'dsh-shortcut-e2e-…'))`, passes it to
+the spawned `dsh web` as `DSH_HOME`, and deletes exactly that directory in its
+cleanup. Point `DSH_BIN` at a specific CLI when several are installed; never point
+`DSH_HOME` at anything outside a directory the helper created.
 
 ## Publish
 
@@ -69,8 +74,10 @@ It publishes with npm **Trusted Publishing** (GitHub OIDC + provenance), so no
 
 The workflow runs typecheck, unit tests, build and `npm pack --dry-run` before
 uploading, and **fails when the release tag (`vX.Y.Z`) and `package.json` version
-disagree** — bump the version before tagging. E2E is intentionally not part of CI:
-it needs a local DSH installation and a real model API key.
+disagree** — bump the version before tagging. After uploading it runs
+`scripts/verify-release.mjs` against the served tarball, so a release whose published
+files or client bundle differ from the tagged commit fails the job. E2E is intentionally
+not part of CI: it needs a local DSH installation and a real model API key.
 
 If Trusted Publishing cannot be used (for example a private repository), fall back
 to a granular automation token: add the repository secret `NPM_TOKEN` and insert
@@ -95,18 +102,47 @@ Once the real version is out, the placeholder can be removed:
 npm unpublish dsh-shortcut@0.0.0-stage --registry=https://registry.npmjs.org --force
 ```
 
-Then smoke-test the published artefact (never the local directory):
+## Afterwards
 
-```powershell
-$home = Join-Path $env:TEMP ("dsh-shortcut-pub-" + [guid]::NewGuid().ToString('N').Substring(0,6))
-New-Item -ItemType Directory $home | Out-Null
-$env:DSH_HOME = $home
-node $env:DSH_BIN plugin --profile web add dsh-shortcut
-node $env:DSH_BIN web --host 127.0.0.1 --port 24631 --no-open   # Ctrl+C after the URL prints
+`pnpm run verify:release [version]` reads what the registry actually serves — not the local
+checkout. Omit the version to audit `latest`; during a release, pass `--expect-git-head` to
+prove the record was built from the tagged commit:
+
+```sh
+pnpm run verify:release 0.2.0 --expect-git-head "$(git rev-parse HEAD)"
 ```
 
-Open the URL, confirm the sidebar "快捷方式" entry is drawn and the page shows no
-`1 entry did not activate` / `startup failed:` message.
+It polls until the version is served, checks the provenance attestation, downloads the
+tarball and verifies its `dist.integrity`, compares the shipped `package.json` with this
+one, checks the promised files, and runs the published `lib/client.js` through the shell's
+module-loader contract — it must fill the session seat, the sidebar footer row and the
+Settings section. Add `--allow-no-provenance` only when auditing a release published by the
+manual fallback above.
+
+A cheap spot check is the same fact from one place:
+
+```sh
+npm view dsh-shortcut@X.Y.Z version dist.tarball gitHead
+```
+
+The runtime mount check is `pnpm run e2e` from the local gate, above. Do **not**
+reproduce it with a hand-written PowerShell `$env:DSH_HOME = …` block:
+
+- In PowerShell, `$HOME` — and therefore `$home`, because variable names are
+  case-insensitive — is a **read-only automatic variable** whose value is the real
+  profile (`C:\Users\<you>`). Assigning to it fails, so `$env:DSH_HOME = $home`
+  silently keeps pointing DSH at the live profile. A later
+  `Remove-Item $home -Recurse -Force` then permanently deletes the real profile,
+  bypassing the Recycle Bin. That exact mistake wiped a user profile on 2026-10-19.
+- The supported pattern is the one used by `e2e/helpers/host.ts` (and by the
+  `dsh-diff-approval` / `dsh-shell-progress` suites): build the path in Node with
+  `mkdtempSync(join(tmpdir(), …))`, pass it only as the child process's `DSH_HOME`,
+  and remove exactly that path in a `finally` — optionally asserting
+  `home.startsWith(tmpdir())` first.
+- If a PowerShell script is unavoidable, use a distinct name such as `$testHome`,
+  assert it matches `Join-Path $env:TEMP 'dsh-shortcut-*'`, and use
+  `Remove-Item -LiteralPath`; never rely on `-ErrorAction SilentlyContinue` to make a
+  wrong path harmless.
 
 ## Version rules
 
@@ -118,3 +154,5 @@ Open the URL, confirm the sidebar "快捷方式" entry is drawn and the page sho
   commit whose version is final.
 - Bump `peerDependencies` only if a real `@deepseek-ai/dsh-*` peer is added; the install guard
   accepts only ranges satisfying the running DSH version.
+- Never name a PowerShell variable `$home`/`$HOME`, and never set `DSH_HOME` to a path that
+  was not created under `%TEMP%` for a single test.

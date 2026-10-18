@@ -96,3 +96,15 @@ jobs:
       - name: Publish
         if: ${{ inputs.dry_run != true }}
         run: npm publish --provenance --access public --registry=https://registry.npmjs.org
+
+      # Read back what the registry actually serves. A green publish step only proves the
+      # upload was accepted; this proves the tarball's files, its manifest and the
+      # published client bundle are the ones this commit built. The script polls while the
+      # fresh version propagates, and fails the job when the served artifact differs.
+      - name: Verify the published artifact
+        if: ${{ inputs.dry_run != true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          node scripts/verify-release.mjs "$version" --expect-git-head "$GITHUB_SHA"

@@ -70,6 +70,7 @@
     "build": "tsc -b tsconfig.json && tsdown --env.DSH_BUILD_FACE client",
     "test": "vitest run",
     "e2e": "playwright test",
+    "verify:release": "node scripts/verify-release.mjs",
     "prepare": "tsc -b tsconfig.json && tsdown --env.DSH_BUILD_FACE client"
   },
   "license": "MIT",
