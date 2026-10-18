@@ -25,6 +25,7 @@ import { editorStore } from './editor.ts'
 import { entriesStore } from './entries.ts'
 import { dictionaries, NS } from './locale.ts'
 import type { Translate } from './locale.ts'
+import { bindNavigation } from './navigation.ts'
 import { startCatalog } from './catalog.ts'
 
 /** Stable Cordis plugin name for this entry. */
@@ -133,6 +134,7 @@ export function apply(ctx: ClientContextLike): void {
   if (connection?.rpc === undefined) throw new Error('dsh-shortcut: the connection RPC service is unavailable')
   entriesStore.bind(new ShortcutApi(connection.rpc))
   startCatalog(ctx, () => ctx.get('sessions'), () => ctx.get('workspaces'))
+  bindNavigation(() => ctx)
 
   seat(ctx, 'conversation.session.header.utilities', {
     id: 'shortcut-session-seat',

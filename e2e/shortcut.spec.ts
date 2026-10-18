@@ -8,10 +8,11 @@
  *   1. the plugin activates and its sidebar trigger sits directly above Settings;
  *   2. every durable user bubble carries "add to shortcut" immediately LEFT of
  *      the copy button, and the capture dialog seeds itself from that bubble;
- *   3. a captured shortcut delivers its text into the ORIGINAL session while the
- *      reader stays in another one (the target's transcript gains the message;
- *      the current session's does not, and the page never navigated);
- *   4. the Settings page can edit, add and delete records;
+ *   3. a captured shortcut delivers its text into the ORIGINAL session and
+ *      navigates there by default (the jump switch), while the second session
+ *      stays untouched; a record with the switch off delivers without moving;
+ *   4. the Settings page can edit (including the jump switch), add and delete
+ *      records;
  *   5. the records survive a host restart.
  *
  * The plugin's `lib/` must already be built (`pnpm run e2e` does not build).
@@ -36,11 +37,7 @@ const LOCALE: 'zh' | 'en' = process.env.E2E_LOCALE === 'en' ? 'en' : 'zh'
 
 /** The text captured from a bubble and later delivered by the menu. */
 const CAPTURE_TEXT = LOCALE === 'en' ? 'Restart the dev service' : '重启服务：请重启 dev 服务'
-/** A substring of CAPTURE_TEXT that identifies that session in the sidebar.
- * Short on purpose: the sidebar truncates long generated titles, so a probe
- * longer than the visible prefix would stop matching on an English run. */
-const CAPTURE_PROBE = LOCALE === 'en' ? 'Restart the dev' : '请重启 dev 服务'
-/** The second session's own message; used to prove the view did not switch. */
+/** The second session's own message; used to prove delivery stayed targeted. */
 const OTHER_TEXT = LOCALE === 'en' ? 'This is the second session message' : '这是第二个会话的消息'
 /** A substring of OTHER_TEXT that identifies that session in the sidebar (short for the same reason). */
 const OTHER_PROBE = LOCALE === 'en' ? 'second session' : '第二个会话的消息'
@@ -181,6 +178,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(text).toHaveValue(CAPTURE_TEXT)
     await expect(confirm).toBeDisabled()
     await expect(page.locator('[role="dialog"][aria-modal="true"]')).toBeVisible()
+    // The navigate switch exists, defaults to on, and explains itself.
+    const navigate = page.locator('[data-dsh-shortcut-navigate]')
+    await expect(navigate).toBeVisible()
+    await expect(navigate).toContainText(/跳转到该会话|Jump to the session/)
+    const navSwitch = navigate.getByRole('switch')
+    await expect(navSwitch).toHaveAttribute('aria-checked', 'true')
 
     await name.fill(SHORTCUT_NAME)
     await expect(confirm).toBeEnabled()
@@ -194,11 +197,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
       name: SHORTCUT_NAME,
       sessionId: sessionA,
       text: CAPTURE_TEXT,
+      navigate: true,
       target: { kind: 'main' },
     })
   })
 
-  test('3. the menu has an About item, and delivers into the original session without switching the view', async () => {
+  test('3. the menu has an About item, and a default shortcut jumps to its session on delivery', async () => {
     const workspaceTitle = fixture.workspace.split(/[\\/]/).pop() ?? 'workspace'
     sessionB = await beginSession(page, workspaceTitle, fixture.home, OTHER_TEXT)
     expect(sessionB).not.toBe(sessionA)
@@ -241,27 +245,13 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await item.click()
     await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
 
-    // The press did NOT navigate: the page still shows the second session.
-    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached()
-    await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toHaveCount(0)
-
-    // The ORIGINAL session now holds a second copy of the delivered message.
-    // (The sidebar title is that session's first message.)
-    const originalRow = page.getByRole('treeitem').filter({ hasText: CAPTURE_PROBE }).first()
-    await expect(originalRow).toBeVisible({ timeout: 15_000 })
-    await originalRow.click()
+    // The jump switch defaults to on, so delivery also OPENED the shortcut's
+    // session: its transcript holds the original message plus the delivered copy.
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toBeAttached({ timeout: 15_000 })
-    try {
-      await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 30_000 })
-    } catch (error) {
-      const bubbles = await page.locator('[data-chat-flow-kind="user"]').allInnerTexts()
-      const main = await page.locator('body').innerText()
-      console.log('[e2e debug] user bubbles:', JSON.stringify(bubbles))
-      console.log('[e2e debug] body:', main.slice(0, 3000))
-      throw error
-    }
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toHaveCount(0)
+    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 30_000 })
 
-    // And the session the reader was in received nothing.
+    // The session the reader was in received nothing.
     const secondRow = page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first()
     await expect(secondRow).toBeVisible({ timeout: 20_000 })
     await secondRow.click({ timeout: 20_000 })
@@ -323,10 +313,16 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     // selected row into view without any extra click.
     await expect(page.locator('[data-dsh-shortcut-picker] [data-dsh-shortcut-selected]'))
       .toBeVisible({ timeout: 15_000 })
+    // The jump switch reopens in its stored state (on) and can be turned off.
+    const navSwitch = page.locator('[data-dsh-shortcut-navigate]').getByRole('switch')
+    await expect(navSwitch).toHaveAttribute('aria-checked', 'true')
+    await navSwitch.click()
+    await expect(navSwitch).toHaveAttribute('aria-checked', 'false')
     await name.fill(RENAMED)
     await page.locator('[data-dsh-shortcut-confirm]').click()
     await expect(page.locator('[data-dsh-shortcut-row]').filter({ hasText: RENAMED })).toBeVisible({ timeout: 10_000 })
     expect(storedEntries().map(entry => entry.name)).toEqual([RENAMED])
+    expect(storedEntries()[0]?.navigate).toBe(false)
 
     // --- add a record by hand, picking the target from the tree
     await page.locator('[data-dsh-shortcut-settings-add]').click()
@@ -337,6 +333,10 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     // The target tree is inline in the dialog — there is no dropdown to open.
     const picker = page.locator('[data-dsh-shortcut-picker]')
     await expect(picker).toBeVisible({ timeout: 10_000 })
+    // The tree list is a stretched panel, not a box that hugs its few rows.
+    const treeList = picker.getByRole('tree')
+    await expect(treeList).toBeVisible()
+    expect((await treeList.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(190)
     // Group rows wear the native folder icon; target rows do not. The tree opens
     // with workspaces collapsed, so the first press expands it.
     const workspaceRow = picker.locator('[data-dsh-shortcut-tree-workspace]').first()
@@ -361,6 +361,8 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     const manualEntry = storedEntries().find(entry => entry.name === MANUAL_NAME)
     expect(manualEntry?.target).toMatchObject({ kind: 'main' })
     expect(typeof manualEntry?.target.path).toBe('string')
+    // A manually added record also starts with the jump switch on.
+    expect(manualEntry?.navigate).toBe(true)
 
     // --- delete the manual record
     await page.locator('[data-dsh-shortcut-row]').filter({ hasText: MANUAL_NAME })
@@ -368,6 +370,24 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await page.locator('[data-dsh-shortcut-delete-confirm]').click()
     await expect(page.locator('[data-dsh-shortcut-row]').filter({ hasText: MANUAL_NAME })).toHaveCount(0, { timeout: 10_000 })
     expect(storedEntries().map(entry => entry.name)).toEqual([RENAMED])
+  })
+
+  test('4b. with the jump switch off, sending delivers without navigating', async () => {
+    // Leave the Settings overlay (it owns a full-page mask) before driving the sidebar.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-dsh-shortcut-settings]')).toBeHidden({ timeout: 10_000 })
+    // Back to a conversation: pick the second session.
+    const secondRow = page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first()
+    await expect(secondRow).toBeVisible({ timeout: 20_000 })
+    await secondRow.click({ timeout: 20_000 })
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 20_000 })
+
+    await page.locator('[data-dsh-shortcut-trigger]').click()
+    await page.getByRole('menuitem', { name: RENAMED }).click()
+    await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
+    // Switch off: the view stays on the second session and never opens A.
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached()
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toHaveCount(0)
   })
 
   test('5. records survive a host restart', async () => {
@@ -387,12 +407,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
 })
 
 /** Read the plugin's own store file from the throwaway home. */
-function storedEntries(): Array<{ name: string; sessionId: string; text: string; target?: { kind?: string; path?: string } }> {
+function storedEntries(): Array<{ name: string; sessionId: string; text: string; navigate?: boolean; target?: { kind?: string; path?: string } }> {
   try {
     const file = join(fixture.home, 'shortcut', 'entries.json')
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as { entries?: unknown }
     return Array.isArray(parsed.entries)
-      ? parsed.entries as Array<{ name: string; sessionId: string; text: string; target?: { kind?: string; path?: string } }>
+      ? parsed.entries as Array<{ name: string; sessionId: string; text: string; navigate?: boolean; target?: { kind?: string; path?: string } }>
       : []
   } catch {
     return []

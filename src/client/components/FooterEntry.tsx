@@ -2,11 +2,12 @@
  * The sidebar-foot entry: the button directly above the shell's Settings
  * button, and the menu it opens.
  *
- * Pressing a menu item delivers that shortcut's text into its target session
- * WITHOUT navigating: the reader stays in the conversation they are reading,
- * which is the whole point of the feature (the alternative — switching
- * sessions, typing the text, switching back — is what it replaces). The
- * outcome is reported by a toast, and a failure keeps its reason.
+ * Pressing a menu item delivers that shortcut's text into its target agent. By
+ * default it also opens that target in the shell (the shortcut's "jump to that
+ * session" switch, on from the start), so the delivered message is visible at
+ * once; records can turn the jump off and then delivery stays in the background,
+ * leaving the reader in the conversation they are reading. The outcome is
+ * reported by a toast, and a failure keeps its reason.
  *
  * This entry also hosts the plugin's single dialog and banner instance: it is
  * mounted for the life of the page, so a capture started from a bubble (a DOM
@@ -23,6 +24,7 @@ import { bannerStore, mountedHosts } from '../editor.ts'
 import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
+import { openDeliveredTarget } from '../navigation.ts'
 import { targetShortLabel } from '../catalog.ts'
 import { ShortcutIcon } from './ShortcutIcon.tsx'
 import { ShortcutEditorDialog } from './EditorDialog.tsx'
@@ -83,6 +85,7 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
     try {
       const receipt = await entriesStore.send(id)
       bannerStore.show(t('toast.sent', { target: targetShortLabel(receipt.target, receipt.sessionId, t) }), { tone: 'success' })
+      if (receipt.navigate) openDeliveredTarget(receipt)
     } catch (error: unknown) {
       const code = error instanceof ShortcutFailure ? error.code : 'send-failed'
       bannerStore.show(errorText(t, code), { holdMs: 6000 })

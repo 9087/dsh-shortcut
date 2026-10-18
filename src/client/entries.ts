@@ -132,7 +132,7 @@ export class EntriesStore {
    * @param id - record identity.
    * @returns the host's delivery receipt.
    */
-  async send(id: string): Promise<{ name: string; sessionId: string; target: ShortcutTarget }> {
+  async send(id: string): Promise<{ name: string; sessionId: string; target: ShortcutTarget; navigate: boolean }> {
     const api = this.api
     if (api === undefined) throw new ShortcutFailure('send-failed', 'the store is not connected')
     return api.send(id)

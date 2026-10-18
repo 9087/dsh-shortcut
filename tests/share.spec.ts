@@ -11,6 +11,7 @@ function entry(overrides: Partial<ShortcutEntry>): ShortcutEntry {
     sessionId: 'session-a',
     target: { kind: 'main' },
     text: '重启',
+    navigate: true,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -18,7 +19,7 @@ function entry(overrides: Partial<ShortcutEntry>): ShortcutEntry {
 }
 
 /** A complete main-agent draft. */
-function draft(overrides: Record<string, unknown> = {}): { name: string; sessionId: string; target: unknown; text: string } {
+function draft(overrides: Record<string, unknown> = {}): { name: string; sessionId: string; target: unknown; text: string; navigate?: boolean } {
   return { name: 'n', sessionId: 's', target: { kind: 'main' as const }, text: 'x', ...overrides }
 }
 
@@ -80,8 +81,14 @@ describe('validateDraft', () => {
     const result = validateDraft([], draft({ name: '  重启服务 ', sessionId: ' session-a ', text: '  重启  ' }))
     expect(result).toEqual({
       ok: true,
-      draft: { name: '重启服务', sessionId: 'session-a', target: { kind: 'main' }, text: '重启' },
+      draft: { name: '重启服务', sessionId: 'session-a', target: { kind: 'main' }, text: '重启', navigate: true },
     })
+  })
+
+  it('defaults navigation on, and keeps an explicit off', () => {
+    expect(validateDraft([], draft()).ok && (validateDraft([], draft()) as { draft: { navigate: boolean } }).draft.navigate).toBe(true)
+    const off = validateDraft([], draft({ navigate: false }))
+    expect(off.ok && (off as { draft: { navigate: boolean } }).draft.navigate).toBe(false)
   })
 
   it('normalizes a child target end to end', () => {
@@ -94,6 +101,7 @@ describe('validateDraft', () => {
         sessionId: 'session-a',
         target: { kind: 'member', childSessionId: 'child-1', leafLabel: 'writer', ancestors: ['session-a'] },
         text: 'x',
+        navigate: true,
       },
     })
   })

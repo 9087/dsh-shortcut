@@ -47,6 +47,7 @@ export interface ValidDraft {
   sessionId: string
   target: ShortcutTarget
   text: string
+  navigate: boolean
 }
 
 /** Whether one value is a known target kind. */
@@ -133,7 +134,19 @@ export function validateDraft(
     if (excludeId !== undefined && entry.id === excludeId) continue
     if (nameKey(entry.name) === key) return { ok: false, problem: 'name-taken' }
   }
-  return { ok: true, draft: { name, sessionId, target, text } }
+  return {
+    ok: true,
+    draft: {
+      name,
+      sessionId,
+      target,
+      text,
+      // Only an explicit `false` turns navigation off; a missing field (an
+      // older client, or a record written before the switch existed) is the
+      // default: open the target.
+      navigate: draft.navigate !== false,
+    },
+  }
 }
 
 /** Build the error detail the host puts on the wire. */

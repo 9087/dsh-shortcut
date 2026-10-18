@@ -74,6 +74,12 @@ export interface ShortcutEntry {
   sessionId: string
   /** Text delivered as one user message. */
   text: string
+  /**
+   * Whether triggering the shortcut also opens its target (the session, or the
+   * agent inside it) in the shell. Defaults to true; records written before
+   * this field existed are read as true.
+   */
+  navigate: boolean
   /** Which agent inside `sessionId` receives the text. */
   target: ShortcutTarget
   /** Unix epoch ms of creation. */
@@ -94,6 +100,8 @@ export interface ShortcutDraft {
   sessionId: string
   target: ShortcutTarget
   text: string
+  /** Open the target after delivery; omitted means true (the default). */
+  navigate?: boolean
 }
 
 /** An edit address: the id plus the full replacement draft. */

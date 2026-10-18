@@ -142,6 +142,7 @@ function draftOf(payload: unknown): ShortcutDraft | undefined {
     sessionId: draft.sessionId as string,
     target: draft.target as ShortcutTarget,
     text: draft.text as string,
+    ...(typeof draft.navigate === 'boolean' ? { navigate: draft.navigate } : {}),
   }
 }
 
@@ -158,6 +159,7 @@ function editOf(payload: unknown): ShortcutEdit | undefined {
       sessionId: draft.sessionId as string,
       target: draft.target as ShortcutTarget,
       text: draft.text as string,
+      ...(typeof draft.navigate === 'boolean' ? { navigate: draft.navigate } : {}),
     },
   }
 }
@@ -255,7 +257,13 @@ export function apply(ctx: Context): void {
     }
     return value({
       accepted: true,
-      entry: { id: entry.id, name: entry.name, sessionId: entry.sessionId, target: { ...entry.target } },
+      entry: {
+        id: entry.id,
+        name: entry.name,
+        sessionId: entry.sessionId,
+        target: { ...entry.target },
+        navigate: entry.navigate,
+      },
     })
   }
 

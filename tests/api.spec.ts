@@ -23,6 +23,7 @@ const ENTRY = {
   name: '重启服务',
   sessionId: 'session-a',
   text: '重启',
+  navigate: true,
   target: { kind: 'main' as const },
   createdAt: 10,
   updatedAt: 20,
@@ -58,12 +59,21 @@ describe('ShortcutApi', () => {
       name: ENTRY.name,
       sessionId: ENTRY.sessionId,
       target: { kind: 'main' },
+      navigate: true,
     })
     expect(calls.map(call => call.endpoint)).toEqual(['create', 'update', 'remove', 'send'])
     expect(calls[0]?.payload).toEqual({ draft: DRAFT })
     expect(calls[1]?.payload).toEqual({ edit: { id: 'id-1', draft: DRAFT } })
     expect(calls[2]?.payload).toEqual({ id: 'id-1' })
     expect(calls[3]?.payload).toEqual({ id: 'id-1' })
+  })
+
+  it('reads the navigate switch, defaulting a legacy record to true', async () => {
+    const legacy = { ...ENTRY }
+    delete (legacy as { navigate?: boolean }).navigate
+    const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [legacy, { ...ENTRY, navigate: false }] } }))
+    const entries = await new ShortcutApi(rpc).list()
+    expect(entries.map(entry => entry.navigate)).toEqual([true, false])
   })
 
   it('keeps the host\'s business failure code', async () => {

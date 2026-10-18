@@ -27,10 +27,12 @@ edited and deleted:
 
 ## Features
 
-- **Sidebar-foot menu, one click, no navigation**: a "Shortcuts" row sits between other plugins'
-  footer actions and the shell's Settings row. It opens upward into a menu of every saved
-  shortcut; pressing one delivers its text to the target while the page stays where it is. A
-  toast names the target that received it.
+- **Sidebar-foot menu, one click**: a "Shortcuts" row sits between other plugins'
+  footer actions and the shell's Settings row. It opens into a menu of every saved shortcut; pressing
+  one delivers its text to the target and, by default, **jumps to that session** so the result is
+  visible at once. Every record carries a **"Jump to the session" switch** in the add/edit dialog
+  (on by default): turning it off sends in the background and leaves the page where it is. A toast
+  names the target that received it.
 - **The target tree lives in the dialog, not in a dropdown**: the add/edit dialog shows one
   read-only full-path line for the current target, followed by the tree itself (search, expandable
   workspaces/sessions, inline list). A workspace row wears the shell's own folder icon and is

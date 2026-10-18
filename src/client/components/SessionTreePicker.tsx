@@ -410,7 +410,6 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
           <p className={css.treeNotice}>{t('picker.loadFailed')}</p>
         )}
       </div>
-      <p className={css.treeHint}>{t('picker.hint')}</p>
     </div>
   )
 }

@@ -93,6 +93,7 @@ describe('ShortcutStore', () => {
       name: '旧条目',
       sessionId: 'session-old',
       text: '旧内容',
+      navigate: true,
       target: { kind: 'main' },
       createdAt: 7,
       updatedAt: 9,
@@ -107,6 +108,36 @@ describe('ShortcutStore', () => {
     const store = new ShortcutStore(freshDir())
     await expect(store.create(draft({ target: { kind: 'subagent', childSessionId: 's' } })))
       .rejects.toMatchObject({ code: 'invalid-input' })
+  })
+
+  it('persists an explicit navigate=false and defaults missing fields to true', async () => {
+    const dir = freshDir()
+    const store = new ShortcutStore(dir)
+    const off = await store.create(draft({ name: 'silent', navigate: false }))
+    expect(off.navigate).toBe(false)
+    const on = await store.create(draft({ name: 'jump' }))
+    expect(on.navigate).toBe(true)
+    // A version-2 record written before the switch existed reads as true.
+    writeFileSync(storeFile(dir), JSON.stringify({
+      version: 2,
+      entries: [{
+        id: 'old', name: 'old', sessionId: 's', text: 't',
+        target: { kind: 'main' }, createdAt: 1, updatedAt: 2,
+      }],
+    }))
+    await expect(new ShortcutStore(dir).list()).resolves.toEqual([{
+      id: 'old', name: 'old', sessionId: 's', text: 't', navigate: true,
+      target: { kind: 'main' }, createdAt: 1, updatedAt: 2,
+    }])
+  })
+
+  it('refuses a non-boolean navigate value in a stored record', async () => {
+    const dir = freshDir()
+    writeFileSync(storeFile(dir), JSON.stringify({
+      version: 2,
+      entries: [{ id: 'x', name: 'n', sessionId: 's', text: 't', navigate: 'yes', target: { kind: 'main' }, createdAt: 1, updatedAt: 1 }],
+    }))
+    await expect(new ShortcutStore(dir).list()).rejects.toMatchObject({ code: 'store-unavailable' })
   })
 
   it('refuses a duplicate name, case-insensitively', async () => {

@@ -656,16 +656,6 @@
   font-size: 12px;
   line-height: 18px;
 }
-
-.treeHint {
-  flex: none;
-  margin: 0;
-  padding: 6px 10px;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
-}
 /* ---- Session row: the row itself is the main-agent target; chevron only for real children ---- */
 
 .treeSessionRow {
@@ -740,10 +730,12 @@
 
 .treeInline {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 6px;
   width: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 .treePath {
@@ -771,18 +763,16 @@
   border-bottom: none;
 }
 
+/* The list always fills the column under the search box: it keeps a 200px
+   floor even when the tree is short, and grows with the message body. */
 .treeInline > .treeList {
-  max-height: 240px;
+  flex: 1 1 auto;
+  min-height: 200px;
   overflow-y: auto;
   padding: 4px;
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-bg-base);
-}
-
-.treeInline > .treeHint {
-  padding: 0;
-  border-top: none;
 }
 /* Wide two-column editor: name + target tree left, message body right. */
 
@@ -822,13 +812,26 @@
   min-height: 246px;
   resize: vertical;
 }
-
-.treeInline > .treeList {
-  max-height: 200px;
-}
 /* The name field spans both columns; the target tree and content share the row below. */
 .formWide {
   grid-column: 1 / -1;
+}
+/* "Jump to that session" switch: label and control sit together, hint below. */
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.switchRow .fieldLabel {
+  margin-bottom: 0;
+}
+
+.switchHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
 }
 /* ---- Sidebar shortcut menu: opens to the right of its trigger, roomier rows ---- */
 

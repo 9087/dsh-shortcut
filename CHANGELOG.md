@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A "Jump to the session" switch in the add/edit dialog**, on by default: triggering a shortcut now delivers its text and then opens the target session in the shell, so the result is visible instead of only toasted. Turning the switch off restores background-only delivery and keeps the current conversation. The choice is stored per record (`navigate`, missing/legacy records read as on), the edit dialog reopens with its stored state, and E2E covers both a default jump and an off record that stays put.
+
 ## 0.1.0 — 2026-10-19
 
 First release. Tested against `@deepseek-ai/dsh` 0.2.0-rc.2.

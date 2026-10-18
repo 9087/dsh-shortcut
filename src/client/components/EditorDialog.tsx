@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef } from 'react'
-import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Modal, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { bannerStore, editorStore, useEditor } from '../editor.ts'
 import { useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
@@ -165,6 +165,19 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
             onChange={(event) => { editorStore.patch({ text: event.currentTarget.value }) }}
           />
         </label>
+
+        {/* Behaviour after delivery: open the target (default), or stay put. */}
+        <div className={`${css.field} ${css.formWide}`} data-dsh-shortcut-navigate="">
+          <div className={css.switchRow}>
+            <span className={css.fieldLabel}>{t('dialog.navigateLabel')}</span>
+            <Switch
+              checked={state.navigate}
+              onChange={(next) => { editorStore.patch({ navigate: next }) }}
+              label={t('dialog.navigateLabel')}
+            />
+          </div>
+          <span className={css.switchHint}>{t('dialog.navigateHint')}</span>
+        </div>
       </div>
       {problem !== undefined && <p className={css.problem}>{problem}</p>}
     </Modal>
