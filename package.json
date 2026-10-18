@@ -71,9 +71,9 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "verify:release": "node scripts/verify-release.mjs",
+    "release": "release-it && node scripts/verify-release.mjs",
     "prepare": "tsc -b tsconfig.json && tsdown --env.DSH_BUILD_FACE client"
   },
-  "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1",
     "react": "^18.2.0"
@@ -92,12 +92,14 @@
     "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
     "@deepseek-ai/dsh-session": "0.2.0-rc.2",
     "@playwright/test": "^1.63.0",
+    "@release-it/conventional-changelog": "^12.0.2",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "jsdom": "^29.1.1",
     "lightningcss": "^1.32.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "release-it": "^21.1.1",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

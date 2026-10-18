@@ -34,15 +34,35 @@ the spawned `dsh web` as `DSH_HOME`, and deletes exactly that directory in its
 cleanup. Point `DSH_BIN` at a specific CLI when several are installed; never point
 `DSH_HOME` at anything outside a directory the helper created.
 
-## Publish
+## Publish: one command
 
-```powershell
-npm version 0.1.0 --no-git-tag-version   # or bump following semver
-pnpm run build
-npm publish --registry=https://registry.npmjs.org
+```sh
+pnpm run release          # release-it, then node scripts/verify-release.mjs
 ```
 
-With 2FA on the account, add `--otp=<6-digit code>` to the publish command.
+It runs on a clean working tree; the hook below is the gate, so a release cannot start
+from a tree that fails it. `.release-it.json` decides what it does:
+
+- **`before:bump` runs `pnpm run build && pnpm test`.** A red build or a red unit suite
+  stops the release *before* the version is bumped, so a failing commit never gets a tag.
+  The browser suite is deliberately not in that hook — it needs a local `dsh` — so run
+  `pnpm run e2e` by hand before releasing a behaviour change.
+- The next version comes from the conventional-commit prefixes since the last tag
+  (`@release-it/conventional-changelog`): `feat:` → minor, `fix:` / `perf:` → patch,
+  `feat!:` / `BREAKING CHANGE` → major, and anything else does not advance the version.
+  Measured on this repo: `feat:` → `0.3.0`, `fix:` → `0.2.1`, `feat!:` → `1.0.0`,
+  `build:` → no release at all.
+- `CHANGELOG.md` is generated from those commits, never hand-written. The `0.1.0` and
+  `0.2.0` entries stay as they were written; each new version is prepended above them.
+- It commits `chore: release vX.Y.Z`, tags `vX.Y.Z`, and **pushes both**
+  (`"git": { "push": true }`) — there is no separate `git push` / `git push --tags` step.
+- It does **not** publish to npm (`"npm": { "publish": false }`) and does **not** create
+  the GitHub Release (`"github": { "release": false }`). Both belong to CI, so every
+  version has exactly one release page, created only after the served artifact was
+  verified.
+
+`release-it` needs Node `^22.22.2 || ^24.15.0 || >=26`; this machine runs 24.x. A
+contributor on Node 20 can build and test, but not cut a release.
 
 ## Publish from GitHub Actions (Trusted Publishing)
 
@@ -60,24 +80,21 @@ It publishes with npm **Trusted Publishing** (GitHub OIDC + provenance), so no
    - Repository: `dsh-shortcut`
    - Workflow filename: `publish.yml`
    - Environment: leave empty (or name one and uncomment `environment:` in the workflow)
-3. Push the workflow, then create a GitHub **Release** for the matching tag:
-
-   ```powershell
-   git tag v0.1.0
-   git push origin v0.1.0
-   gh release create v0.1.0 --title v0.1.0 --notes "First release."
-   ```
-
-   Publishing the release triggers the workflow. It can also be started manually
-   (Actions → **Publish to npm** → Run workflow, with an optional `dry_run`), which
-   publishes whatever version `package.json` currently holds.
+3. Push the workflow. After that, `pnpm run release` pushes the tag and this workflow does
+   the rest — nothing else to run by hand. It can also be started manually (Actions →
+   **Publish to npm** → Run workflow, with an optional `dry_run`), which publishes
+   whatever version `package.json` currently holds; a manual run has no tag, so it
+   creates no Release page.
 
 The workflow runs typecheck, unit tests, build and `npm pack --dry-run` before
 uploading, and **fails when the release tag (`vX.Y.Z`) and `package.json` version
-disagree** — bump the version before tagging. After uploading it runs
-`scripts/verify-release.mjs` against the served tarball, so a release whose published
-files or client bundle differ from the tagged commit fails the job. E2E is intentionally
-not part of CI: it needs a local DSH installation and a real model API key.
+disagree** — that mismatch is why the version is never hand-edited before tagging.
+After uploading it runs `scripts/verify-release.mjs` against the served tarball, so a
+release whose published files or client bundle differ from the tagged commit fails the
+job. Only after that does it create the **GitHub Release**, with notes generated from the
+commits since the previous tag — so a Release page never exists for an artifact that was
+not proven. E2E is intentionally not part of CI: it needs a local DSH installation and a
+real model API key.
 
 If Trusted Publishing cannot be used (for example a private repository), fall back
 to a granular automation token: add the repository secret `NPM_TOKEN` and insert
@@ -146,12 +163,20 @@ reproduce it with a hand-written PowerShell `$env:DSH_HOME = …` block:
 
 ## Version rules
 
-- `0.1.x` for fixes to the existing surface set.
-- `0.2.0` for a new observable feature (for example the jump switch in `0.2.0`) or when the DSH
-  client API this plugin builds against changes shape (bubble anchors, slot options, session API) —
-  report the tested DSH version in the release notes.
-- Pushing a `v<package.json version>` tag now also publishes (Trusted Publishing), so tag only a
-  commit whose version is final.
+The number is derived, not chosen: `pnpm run release` reads the conventional-commit
+prefixes since the last tag. What you control is therefore the commit subject.
+
+- `fix:` / `perf:` → patch (`0.2.1`): a correction to the existing surface set.
+- `feat:` → minor (`0.3.0`): a new observable feature — the jump switch arrived this way in
+  `0.2.0` — or a DSH client API shape this plugin had to follow (bubble anchors, slot
+  options, session API). Name the DSH version tested in the release notes.
+- `feat!:` / `BREAKING CHANGE` → major. There is no `0.x` special case: on `0.2.0` a
+  breaking change yields `1.0.0`, so ship one only when that number is what you mean.
+- Anything else (`docs:`, `chore:`, `build:`, `test:`) does not advance the version, so a
+  docs-only commit cannot cut a release. `f56672a` is the precedent: it reached `main` and
+  no version was published for it.
+- The tag the release pushes also publishes (Trusted Publishing), so the tagged commit is
+  always one that passed `before:bump` — tag only a commit whose version is final.
 - Bump `peerDependencies` only if a real `@deepseek-ai/dsh-*` peer is added; the install guard
   accepts only ranges satisfying the running DSH version.
 - Never name a PowerShell variable `$home`/`$HOME`, and never set `DSH_HOME` to a path that

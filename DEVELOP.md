@@ -49,10 +49,13 @@ pnpm run typecheck             # tsc -b (host + client)
 pnpm run build                 # tsc -b && tsdown --env.DSH_BUILD_FACE client
 pnpm test                      # vitest (unit: store, port, validation, bridge, DOM bridge, picker tree)
 pnpm run e2e                   # Playwright, real dsh web + throwaway DSH_HOME
+pnpm run release               # release-it (bump/tag/push) then verify:release — see PUBLISH.md
 node scripts/screenshots.mjs   # both READMEs' screenshots (own throwaway hosts; needs DSH_BIN)
 ```
 
 `pnpm run build` must run before `pnpm run e2e`: the suite drives the built `lib/`, never the TS source.
+
+Commit subjects are load-bearing: `pnpm run release` derives the next version from the conventional-commit prefixes since the last tag and generates `CHANGELOG.md` from them. A `feat:` / `fix:` / `perf:` subject changes the version; `docs:` / `chore:` / `build:` / `test:` does not (rules in [PUBLISH.md](PUBLISH.md#version-rules)).
 
 ## E2E
 
