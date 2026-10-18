@@ -1,0 +1,95 @@
+name: Publish to npm
+
+# Publishes dsh-shortcut with npm Trusted Publishing (GitHub OIDC, no NPM_TOKEN).
+# Setup once on npmjs.com: package dsh-shortcut -> Settings -> Trusted publishing ->
+#   Publisher: GitHub Actions
+#   Organization or user: 9087
+#   Repository: dsh-shortcut
+#   Workflow filename: publish.yml
+#   Environment: (leave empty)
+# Then create a GitHub Release for tag v<package.json version> (or run this workflow
+# manually) and the package is published with provenance.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify and pack, but do not upload
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # Required for Trusted Publishing / provenance: npm exchanges this OIDC token.
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional manual approval gate: create an "npm" environment in the repo settings
+    # and uncomment this line. Trusted publishing also accepts the environment name
+    # in its npmjs configuration if you use one.
+    # environment: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Check the tarball contents
+        run: npm pack --dry-run
+
+      # A release must not publish a version that disagrees with its tag.
+      - name: Check the release tag matches package.json
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          expected="v${version}"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match package.json ${expected}."
+            exit 1
+          fi
+
+      # Trusted publishing needs npm >= 11.5.1; the runner's bundled npm is older.
+      - name: Upgrade npm
+        run: npm install --global npm@latest
+
+      - name: Publish (dry run)
+        if: ${{ inputs.dry_run == true }}
+        run: npm publish --dry-run --provenance --access public --registry=https://registry.npmjs.org
+
+      - name: Publish
+        if: ${{ inputs.dry_run != true }}
+        run: npm publish --provenance --access public --registry=https://registry.npmjs.org

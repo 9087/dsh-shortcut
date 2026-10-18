@@ -37,6 +37,64 @@ pnpm run build
 npm publish --registry=https://registry.npmjs.org
 ```
 
+With 2FA on the account, add `--otp=<6-digit code>` to the publish command.
+
+## Publish from GitHub Actions (Trusted Publishing)
+
+The repository ships [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
+It publishes with npm **Trusted Publishing** (GitHub OIDC + provenance), so no
+`NPM_TOKEN` secret and no one-time password is involved. One-time setup:
+
+1. The package must already exist on npm — one version is enough, and the current
+   `0.0.0-stage` placeholder satisfies that. (Configure Trusted Publishing *before*
+   the first real version so that first real publish can go through CI.)
+2. On npmjs.com open the package → **Settings** → **Trusted publishing** →
+   **Add a publisher** and fill in:
+   - Publisher: **GitHub Actions**
+   - Organization or user: `9087`
+   - Repository: `dsh-shortcut`
+   - Workflow filename: `publish.yml`
+   - Environment: leave empty (or name one and uncomment `environment:` in the workflow)
+3. Push the workflow, then create a GitHub **Release** for the matching tag:
+
+   ```powershell
+   git tag v0.1.0
+   git push origin v0.1.0
+   gh release create v0.1.0 --title v0.1.0 --notes "First release."
+   ```
+
+   Publishing the release triggers the workflow. It can also be started manually
+   (Actions → **Publish to npm** → Run workflow, with an optional `dry_run`), which
+   publishes whatever version `package.json` currently holds.
+
+The workflow runs typecheck, unit tests, build and `npm pack --dry-run` before
+uploading, and **fails when the release tag (`vX.Y.Z`) and `package.json` version
+disagree** — bump the version before tagging. E2E is intentionally not part of CI:
+it needs a local DSH installation and a real model API key.
+
+If Trusted Publishing cannot be used (for example a private repository), fall back
+to a granular automation token: add the repository secret `NPM_TOKEN` and insert
+these steps before the publish step (the workflow already targets npmjs and upgrades
+npm):
+
+```yaml
+      - name: Authenticate with npm
+        run: npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish
+        run: npm publish --access public --registry=https://registry.npmjs.org
+```
+
+`--provenance` only works for public source repositories.
+
+Once the real version is out, the placeholder can be removed:
+
+```powershell
+npm unpublish dsh-shortcut@0.0.0-stage --registry=https://registry.npmjs.org --force
+```
+
 Then smoke-test the published artefact (never the local directory):
 
 ```powershell
