@@ -2,12 +2,36 @@
    shared dialog. Every colour/radius comes from the shell's design tokens, so
    the plugin follows light/dark and the host's theme without its own palette. */
 
-/* ---- Sidebar footer trigger (matches the shell's Settings trigger row) ---- */
+/* ---- Sidebar footer trigger (mirrors the shell's Settings trigger row) ----
+   The row pokes 2px past its seat on each side and keeps 4px of vertical
+   rhythm, exactly like the shell's Settings trigger row; that is what makes the
+   hover/open highlight and the popup menu line up with the Settings button
+   below. (Same geometry as dsh-diff-approval's footer layer.) */
 
 .footerRoot {
+  position: relative;
+  flex: none;
   box-sizing: border-box;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  width: calc(100% + 4px);
+  height: 42px;
+  margin: 4px -2px 4px;
+  min-width: 0;
+}
+
+.footerRailRoot {
+  width: 36px;
+  height: 36px;
+  margin: 8px 0 10px;
+  justify-content: center;
+}
+
+/* The primitives Menu wraps its anchor in its own span; without stretching it
+   the trigger shrinks to its content and the open highlight/menu no longer
+   line up with the Settings row. */
+.footerRoot > span {
+  display: flex;
   width: 100%;
   min-width: 0;
 }
@@ -35,6 +59,12 @@
 
 .footerButton:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.footerButton[data-active],
+.footerButtonRail[data-active] {
+  /* Open keeps a solid highlight, the same treatment diff-approval uses. */
+  background: var(--dsw-alias-interactive-bg-hover-solid);
 }
 
 .footerButton:focus-visible {
@@ -84,11 +114,14 @@
   text-overflow: ellipsis;
 }
 
-.footerCount {
+/* The trailing three-dot affordance: this row opens a menu. */
+.footerAffordance {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
 }
 
 /* ---- Settings page ---- */

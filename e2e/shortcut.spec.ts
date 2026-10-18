@@ -110,15 +110,33 @@ test.describe('dsh-shortcut (real Chromium)', () => {
   test('1. the sidebar trigger sits above Settings, and the bubble button left of copy', async () => {
     const trigger = page.locator('[data-dsh-shortcut-trigger]')
     await expect(trigger).toBeVisible()
-    const settingsTrigger = page.locator('[data-slot="sidebar.settings"] button').first()
-    await expect(settingsTrigger).toBeVisible()
-    const triggerBox = await trigger.boundingBox()
-    const settingsBox = await settingsTrigger.boundingBox()
-    expect(triggerBox).not.toBeNull()
-    expect(settingsBox).not.toBeNull()
-    // Our row is above the Settings row, in the same sidebar foot.
-    expect(triggerBox!.y).toBeLessThan(settingsBox!.y)
-    expect(settingsBox!.y - (triggerBox!.y + triggerBox!.height)).toBeLessThan(24)
+    // Geometry is read in ONE pass: the shell draws the sidebar foot after boot,
+    // and two lazy locator resolutions can straddle a layout change.
+    const geometry = await page.evaluate(() => {
+      const rect = (element: Element): { x: number; y: number; width: number; height: number } => {
+        const box = element.getBoundingClientRect()
+        return { x: box.x, y: box.y, width: box.width, height: box.height }
+      }
+      const ours = document.querySelector('[data-dsh-shortcut-trigger]')
+      const candidates = [...document.querySelectorAll('[data-slot="sidebar.settings"] button')]
+      const settings = candidates.find(element => element.getBoundingClientRect().width > 0) ?? candidates[0]
+      return {
+        ours: ours === null ? null : rect(ours),
+        settings: settings === undefined ? null : rect(settings),
+      }
+    })
+    expect(geometry.ours).not.toBeNull()
+    expect(geometry.settings).not.toBeNull()
+    // The row mirrors the Settings trigger's geometry: same left edge, same
+    // width, sitting directly above it with the same 4px / -2px row rhythm.
+    expect(Math.abs(geometry.ours!.x - geometry.settings!.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(geometry.ours!.width - geometry.settings!.width)).toBeLessThanOrEqual(1)
+    expect(geometry.ours!.y).toBeLessThan(geometry.settings!.y)
+    expect(geometry.settings!.y - (geometry.ours!.y + geometry.ours!.height)).toBeLessThanOrEqual(12)
+    // The trailing affordance is the three-dot menu glyph, not a record count.
+    await expect(trigger.locator('[data-dsh-shortcut-affordance]')).toBeVisible()
+    await expect(trigger.locator('[data-dsh-shortcut-affordance] svg')).toHaveCount(1)
+    expect(await trigger.innerText()).not.toMatch(/\d/)
 
     const flow = page.locator('[data-chat-flow-kind="user"]').first()
     await expect(flow).toBeVisible({ timeout: 30_000 })
@@ -175,7 +193,10 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 30_000 })
 
     // The last menu item explains the plugin and how records are managed.
-    await page.locator('[data-dsh-shortcut-trigger]').click()
+    const trigger = page.locator('[data-dsh-shortcut-trigger]')
+    await trigger.click()
+    // Open keeps the same solid highlight the shell gives an open control.
+    await expect(trigger).toHaveAttribute('data-active', '')
     await page.getByRole('menuitem', { name: ABOUT_ITEM }).click()
     const about = page.locator('[data-dsh-shortcut-about]')
     await expect(about).toBeVisible({ timeout: 10_000 })

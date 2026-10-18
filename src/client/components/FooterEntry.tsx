@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconEllipsisOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ShortcutFailure } from '../api.ts'
 import { bannerStore, mountedHosts } from '../editor.ts'
@@ -100,9 +100,12 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
     void deliver(id)
   }
 
-  const count = list.entries.length
   const label = t('trigger.label')
 
+  // Geometry mirrors the shell's Settings trigger row (same width, padding and
+  // 4px / -2px margins), so the open-state highlight and the popup menu line up
+  // with the Settings button below it. The trailing ellipsis is the affordance:
+  // this control opens a menu rather than acting immediately.
   const trigger = (
     <button
       type="button"
@@ -112,16 +115,21 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
       aria-haspopup="menu"
       aria-expanded={open}
       data-dsh-shortcut-trigger=""
+      data-active={open ? '' : undefined}
       onClick={() => { setOpen(value => !value) }}
     >
       <span className={css.footerIcon}><ShortcutIcon /></span>
       {wide && <span className={css.footerLabel}>{label}</span>}
-      {wide && count > 0 && <span className={css.footerCount}>{count}</span>}
+      {wide && (
+        <span className={css.footerAffordance} data-dsh-shortcut-affordance="" aria-hidden="true">
+          <IconEllipsisOutlineRegular size={16} />
+        </span>
+      )}
     </button>
   )
 
   return (
-    <div className={css.footerRoot} data-dsh-shortcut-footer="">
+    <div className={wide ? css.footerRoot : `${css.footerRoot} ${css.footerRailRoot}`} data-dsh-shortcut-footer="">
       <Menu
         open={open}
         onClose={() => { setOpen(false) }}
