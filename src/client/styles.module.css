@@ -830,3 +830,30 @@
 .formWide {
   grid-column: 1 / -1;
 }
+/* ---- Sidebar shortcut menu: opens to the right of its trigger, roomier rows ---- */
+
+.menuCard {
+  box-sizing: border-box;
+  min-width: min(260px, calc(100vw - 24px));
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 4px;
+  border-radius: var(--dsw-radius-md);
+}
+
+.menuCard [role="menuitem"] {
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: var(--dsw-radius-sm);
+  font-size: 13px;
+  line-height: 17px;
+  gap: 6px;
+}
+
+.menuCard [role="menuitem"] + [role="menuitem"] {
+  margin-top: 1px;
+}
+
+.menuCard [role="separator"] {
+  margin: 5px 3px;
+}

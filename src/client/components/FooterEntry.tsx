@@ -15,7 +15,7 @@
  * @module dsh-shortcut/client/components/FooterEntry
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { IconEllipsisOutlineRegular, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { ShortcutFailure } from '../api.ts'
@@ -101,6 +101,21 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
 
   const label = t('trigger.label')
 
+  // `Menu`'s right side is anchored to the anchor's TOP. To make the menu's
+  // BOTTOM line up with the button's bottom edge, hand it a synthetic anchor
+  // rect whose top is `button.bottom - menuHeight`: the card then grows upward
+  // from the button's bottom line. The menu height is the live card height, so
+  // it stays aligned as the record list scrolls or changes.
+  const menuAnchorRect = useCallback((): DOMRect | null => {
+    const triggerEl = document.querySelector('[data-dsh-shortcut-trigger]')
+    if (!(triggerEl instanceof HTMLElement)) return null
+    const rect = triggerEl.getBoundingClientRect()
+    const selector = css.menuCard === undefined ? '' : `.${css.menuCard}`
+    const card = selector.length === 0 ? null : document.querySelector(selector)
+    const height = card instanceof HTMLElement ? card.getBoundingClientRect().height : 0
+    return new DOMRect(rect.left, rect.bottom - height, rect.width, rect.height)
+  }, [])
+
   // Geometry mirrors the shell's Settings trigger row (same width, padding and
   // 4px / -2px margins), so the open-state highlight and the popup menu line up
   // with the Settings button below it. The trailing ellipsis is the affordance:
@@ -135,10 +150,10 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
         anchor={trigger}
         items={items}
         onSelect={onSelect}
-        side="top"
-        align="start"
+        side="right"
         portal
-        compact
+        getAnchorRect={menuAnchorRect}
+        listClassName={css.menuCard ?? ''}
       />
       <ShortcutEditorDialog t={t} />
       <ShortcutAboutDialog open={aboutOpen} onClose={() => { setAboutOpen(false) }} t={t} />

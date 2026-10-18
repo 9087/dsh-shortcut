@@ -210,6 +210,21 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await trigger.click()
     // Open keeps the same solid highlight the shell gives an open control.
     await expect(trigger).toHaveAttribute('data-active', '')
+    // The menu opens to the RIGHT of the sidebar trigger, and it is roomier than
+    // a stock menu (wider card, >= 40px rows).
+    const menu = page.getByRole('menu')
+    const triggerBox = await trigger.boundingBox()
+    const menuBox = await menu.boundingBox()
+    expect(triggerBox).not.toBeNull()
+    expect(menuBox).not.toBeNull()
+    expect(menuBox!.x).toBeGreaterThanOrEqual(triggerBox!.x + triggerBox!.width + 2)
+    expect(menuBox!.width).toBeGreaterThanOrEqual(240)
+    // The card's bottom edge lines up with the trigger's bottom edge.
+    expect(Math.abs(menuBox!.y + menuBox!.height - (triggerBox!.y + triggerBox!.height))).toBeLessThanOrEqual(12)
+    const aboutRow = page.getByRole('menuitem', { name: ABOUT_ITEM })
+    const aboutBox = await aboutRow.boundingBox()
+    expect(aboutBox).not.toBeNull()
+    expect(aboutBox!.height).toBeGreaterThanOrEqual(30)
     await page.getByRole('menuitem', { name: ABOUT_ITEM }).click()
     const about = page.locator('[data-dsh-shortcut-about]')
     await expect(about).toBeVisible({ timeout: 10_000 })
