@@ -26,9 +26,13 @@ import type { Translate } from '../locale.ts'
 import { titleOf, useSessionRows } from '../sessions.ts'
 import { ShortcutIcon } from './ShortcutIcon.tsx'
 import { ShortcutEditorDialog } from './EditorDialog.tsx'
+import { ShortcutAboutDialog } from './AboutDialog.tsx'
 import { BannerHost } from './BannerHost.tsx'
 import css from '../styles.module.css'
 import type { ReactNode } from 'react'
+
+/** Menu-id of the last item; it opens the about dialog instead of delivering. */
+const ABOUT_ID = 'about'
 
 /** Props the sidebar footer seat supplies: column state and the localizer. */
 export interface FooterEntryProps {
@@ -47,6 +51,7 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   const list = useEntries()
   const rows = useSessionRows()
   const [open, setOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   // Claim the page-lifetime host seat and load the records once.
   useEffect(() => {
@@ -61,9 +66,17 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   }, [open])
 
   const items = useMemo<MenuEntry[]>(() => {
-    if (list.phase === 'error') return [{ type: 'label', id: 'load-failed', text: t('menu.loadFailed') }]
-    if (list.entries.length === 0) return [{ type: 'label', id: 'empty', text: t('menu.empty') }]
-    return list.entries.map(entry => ({ id: entry.id, label: entry.name }))
+    // The last row is always the about entry, separated from the records (or
+    // from the empty/load-failure note) so it never reads as another shortcut.
+    const about: MenuEntry = { id: ABOUT_ID, label: t('menu.about') }
+    const separator: MenuEntry = { type: 'separator', id: 'about-separator' }
+    if (list.phase === 'error') {
+      return [{ type: 'label', id: 'load-failed', text: t('menu.loadFailed') }, separator, about]
+    }
+    if (list.entries.length === 0) {
+      return [{ type: 'label', id: 'empty', text: t('menu.empty') }, separator, about]
+    }
+    return [...list.entries.map(entry => ({ id: entry.id, label: entry.name })), separator, about]
   }, [list.entries, list.phase, t])
 
   const deliver = async (id: string): Promise<void> => {
@@ -78,6 +91,11 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   }
 
   const onSelect = (id: string): void => {
+    if (id === ABOUT_ID) {
+      setOpen(false)
+      setAboutOpen(true)
+      return
+    }
     if (!list.entries.some(entry => entry.id === id)) return
     void deliver(id)
   }
@@ -109,7 +127,6 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
         onClose={() => { setOpen(false) }}
         anchor={trigger}
         items={items}
-        footer={[{ type: 'label', id: 'hint', text: t('menu.footerHint') }]}
         onSelect={onSelect}
         side="top"
         align="start"
@@ -117,6 +134,7 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
         compact
       />
       <ShortcutEditorDialog t={t} />
+      <ShortcutAboutDialog open={aboutOpen} onClose={() => { setAboutOpen(false) }} t={t} />
       <BannerHost />
     </div>
   )

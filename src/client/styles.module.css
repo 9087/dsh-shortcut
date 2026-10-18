@@ -372,3 +372,56 @@
   line-height: 22px;
   overflow-wrap: anywhere;
 }
+
+/* ---- About dialog ---- */
+
+.aboutBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aboutLead {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.aboutList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aboutItem {
+  position: relative;
+  padding-left: 14px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.aboutItem::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+}
+
+.aboutNote {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}

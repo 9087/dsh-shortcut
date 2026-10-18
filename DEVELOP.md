@@ -35,6 +35,7 @@ pnpm run typecheck             # tsc -b (host + client)
 pnpm run build                 # tsc -b && tsdown --env.DSH_BUILD_FACE client
 pnpm test                      # vitest (unit: store, port, validation, bridge, DOM bridge)
 pnpm run e2e                   # Playwright, real dsh web + throwaway DSH_HOME
+node scripts/screenshots.mjs   # both READMEs' screenshots (own throwaway hosts; needs DSH_BIN)
 ```
 
 `pnpm run build` must run before `pnpm run e2e`: the suite drives the built `lib/`, never the TS source.
@@ -50,13 +51,26 @@ $env:DSH_BIN = 'C:\Users\吴志伟\AppData\Local\npm-cache\_npx\b86ed90107c62dab
 pnpm run e2e
 ```
 
-`E2E_TIMING=1` prints phase timings. `E2E_SCREENSHOTS=1` also writes the documentation
-screenshots under `docs/images/`; `E2E_LOCALE=en` runs the same story against an English GUI and
-(together with `E2E_SCREENSHOTS=1`) writes the `*.en.png` set used by [README.md](README.md), while
-the default Chinese run writes the set used by [README.zh.md](README.zh.md). All assertions accept
-either language, so neither README's picture set depends on which one a run happened to use.
+`E2E_TIMING=1` prints phase timings. `E2E_LOCALE=en` runs the same story against an English GUI
+(the assertions accept either language). The suite deliberately does NOT write the README images:
+a browser that dies mid-run must cost a test, never a doc artefact. They come from the separate
+screenshot script below.
 
 What it asserts: plugin activation (its own DOM, plus no `startup failed:` in the host log); the sidebar trigger sits above Settings; the bubble button is immediately left of copy; the capture dialog is seeded from the bubble and stores the record; the menu delivers into the original session while the page stays on another session (the target's transcript gains a message, the current one does not); Settings edit/add/delete; records survive a host restart.
+
+## Screenshots
+
+`node scripts/screenshots.mjs` boots one throwaway `dsh web` per UI language, drives the whole
+story, and writes the five images for both READMEs:
+
+| Files | UI | Used by |
+|---|---|---|
+| `docs/images/shortcut-*.png` | Chinese | [README.zh.md](README.zh.md) |
+| `docs/images/shortcut-*.en.png` | English | [README.md](README.md) |
+
+It needs the same `DSH_BIN` the E2E uses and a built `lib/` (the images show the real plugin).
+Re-run it after any UI or icon change; the script adds a settle delay after each "New session"
+press so the shell's generated sidebar titles keep the first characters of the seeded message.
 
 ## Pitfalls this project already paid for
 

@@ -1,29 +1,25 @@
 /**
- * The shortcut glyph: a bookmark with a plus. Drawn here rather than imported
- * so the footer trigger, the menu and the injected bubble button share one
- * shape; sized by CSS in each host.
+ * The shortcut glyph, drawn from the shell's own icon set so the sidebar row
+ * matches the controls beside it: a paper plane (send) at the medium weight and
+ * 16px edge the shell's Settings icon uses.
+ *
+ * The injected bubble button uses the same set in `bubble-capture.ts` (a plain
+ * plus at the regular weight, matching the copy/branch icons in that row); both
+ * are the product's artwork, not a hand-drawn composite, which is what keeps
+ * the stroke, optical size and colour identical to the rest of the UI.
  *
  * @module dsh-shortcut/client/components/ShortcutIcon
  */
 
+import { IconPaperPlaneOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReactNode } from 'react'
+
+/** Edge in px. The shell's sidebar icons are 16px; one step larger keeps this
+ *  row's label (14px) from visually outweighing the glyph, which was the
+ *  complaint the first hand-drawn 16px bookmark kept drawing. */
+export const SHORTCUT_ICON_SIZE = 18
 
 /** Render the shortcut glyph. */
 export function ShortcutIcon(): ReactNode {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path
-        d="M3.5 2.75h9v10.5L8 10.4l-4.5 2.85V2.75Z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 5.1v3.4M6.3 6.8h3.4"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
+  return <IconPaperPlaneOutlineMedium size={SHORTCUT_ICON_SIZE} />
 }

@@ -17,10 +17,13 @@
  * The plugin's `lib/` must already be built (`pnpm run e2e` does not build).
  * Labels are asserted in both languages: the GUI's locale is the host's, not
  * the test's, and a run must not depend on which one the fixture came up in.
+ * (`E2E_LOCALE=en` selects the English fixture; the README screenshots are
+ * produced separately by `scripts/screenshots.mjs` so a doc image can never be
+ * lost to a browser that dies mid-suite.)
  */
 
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   bootstrapHome, describeHome, makeFixture, resolveDsh, startHost, stopHost, tail,
@@ -28,10 +31,8 @@ import {
 } from './helpers/host.ts'
 import { beginSession, dismissNotices, newGuiPage } from './helpers/gui.ts'
 
-/** The fixture's UI language. `E2E_LOCALE=en` also produces the English screenshots. */
+/** The fixture's UI language; the assertions accept either one. */
 const LOCALE: 'zh' | 'en' = process.env.E2E_LOCALE === 'en' ? 'en' : 'zh'
-/** Screenshot-name suffix, so the English set never overwrites the Chinese one. */
-const SHOTS_SUFFIX = process.env.E2E_SHOTS_SUFFIX ?? (LOCALE === 'en' ? '.en' : '')
 
 /** The text captured from a bubble and later delivered by the menu. */
 const CAPTURE_TEXT = LOCALE === 'en' ? 'Restart the dev service' : '重启服务：请重启 dev 服务'
@@ -55,6 +56,8 @@ const ADD_LABEL = /加入快捷方式|Add to shortcuts/
 const SENT_BANNER = /已发送到|Sent to/
 /** The Settings tab label, in either UI language. */
 const TAB_LABEL = /快捷方式|Shortcuts/
+/** The menu's last item, in either UI language. */
+const ABOUT_ITEM = /关于此菜单|About this menu/
 
 let fixture: Fixture
 let browser: Browser
@@ -62,22 +65,6 @@ let page: Page
 let host: Host
 let sessionA: string
 let sessionB: string
-
-/**
- * Capture one documentation screenshot, when `E2E_SCREENSHOTS=1` asked for it.
- * The suite's assertions are the test; these images are the hand-off artefact.
- * @param name - file name under `docs/images`.
- * @param options - optional clip rectangle in page coordinates.
- */
-async function shoot(name: string, options: { clip?: { x: number; y: number; width: number; height: number } } = {}): Promise<void> {
-  if (process.env.E2E_SCREENSHOTS !== '1') return
-  const directory = join('docs', 'images')
-  mkdirSync(directory, { recursive: true })
-  await page.screenshot({
-    path: join(directory, name.replace(/\.png$/, `${SHOTS_SUFFIX}.png`)),
-    ...(options.clip === undefined ? { fullPage: false } : { clip: options.clip }),
-  })
-}
 
 test.describe.configure({ mode: 'serial' })
 
@@ -153,26 +140,6 @@ test.describe('dsh-shortcut (real Chromium)', () => {
       }
     })
     expect(placement).toEqual({ nextIsCopy: true, leftOfCopy: true })
-
-    // Hand-off screenshots: the bubble's action row and the sidebar foot.
-    const flowBox = await flow.boundingBox()
-    if (flowBox !== null) {
-      await shoot('shortcut-bubble.png', {
-        clip: { x: Math.max(0, flowBox.x - 16), y: Math.max(0, flowBox.y - 16), width: flowBox.width + 140, height: flowBox.height + 56 },
-      })
-    }
-    const footerBox = await page.locator('[data-slot="sidebar.footer.action"]').boundingBox()
-    const settingsRowBox = await settingsTrigger.boundingBox()
-    if (footerBox !== null && settingsRowBox !== null) {
-      await shoot('shortcut-sidebar.png', {
-        clip: {
-          x: 0,
-          y: Math.max(0, footerBox.y - 10),
-          width: 300,
-          height: Math.min(900, settingsRowBox.y + settingsRowBox.height - footerBox.y + 20),
-        },
-      })
-    }
   })
 
   test('2. the bubble button opens the dialog seeded from that bubble, and capture stores the record', async () => {
@@ -187,10 +154,7 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(name).toHaveValue('')
     await expect(text).toHaveValue(CAPTURE_TEXT)
     await expect(confirm).toBeDisabled()
-    const dialog = page.locator('[role="dialog"][aria-modal="true"]')
-    await expect(dialog).toBeVisible()
-    await page.waitForTimeout(250)
-    await shoot('shortcut-dialog.png')
+    await expect(page.locator('[role="dialog"][aria-modal="true"]')).toBeVisible()
 
     await name.fill(SHORTCUT_NAME)
     await expect(confirm).toBeEnabled()
@@ -203,18 +167,28 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     expect(entry).toMatchObject({ name: SHORTCUT_NAME, sessionId: sessionA, text: CAPTURE_TEXT })
   })
 
-  test('3. the menu delivers into the original session without switching the view', async () => {
+  test('3. the menu has an About item, and delivers into the original session without switching the view', async () => {
     const workspaceTitle = fixture.workspace.split(/[\\/]/).pop() ?? 'workspace'
     sessionB = await beginSession(page, workspaceTitle, fixture.home, OTHER_TEXT)
     expect(sessionB).not.toBe(sessionA)
     // The shell is showing B when its own header publishes B's id.
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 30_000 })
 
+    // The last menu item explains the plugin and how records are managed.
+    await page.locator('[data-dsh-shortcut-trigger]').click()
+    await page.getByRole('menuitem', { name: ABOUT_ITEM }).click()
+    const about = page.locator('[data-dsh-shortcut-about]')
+    await expect(about).toBeVisible({ timeout: 10_000 })
+    await expect(about).toContainText('dsh-shortcut')
+    await expect(about).toContainText(ADD_LABEL)
+    await expect(about).toContainText(/编辑|Edit|change/)
+    await expect(about).toContainText(/删除|Delete/)
+    await page.locator('[data-dsh-shortcut-about-close]').click()
+    await expect(about).toBeHidden()
+
     await page.locator('[data-dsh-shortcut-trigger]').click()
     const item = page.getByRole('menuitem', { name: SHORTCUT_NAME })
     await expect(item).toBeVisible()
-    await page.waitForTimeout(250)
-    await shoot('shortcut-menu.png')
     await item.click()
     await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
 
@@ -245,7 +219,6 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await tab.click()
     const row = page.locator('[data-dsh-shortcut-row]').filter({ hasText: SHORTCUT_NAME })
     await expect(row).toBeVisible({ timeout: 15_000 })
-    await shoot('shortcut-settings.png')
 
     // --- edit the name
     await row.locator('[data-dsh-shortcut-edit]').click()

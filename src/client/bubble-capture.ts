@@ -30,11 +30,15 @@ const FLOW_SELECTOR = '[data-chat-flow-kind="user"]'
 /** The action row a user bubble renders (`clock: 'start'`). */
 const ACTION_ROW_SELECTOR = '[data-clock="start"]'
 
-/** The injected glyph: a bookmark with a plus, 16×16, currentColor. */
+/**
+ * The injected glyph: the shell's own 16px regular plus (the same artwork and
+ * weight as the copy control beside it), so the button reads as "add" without a
+ * hand-drawn composite that breaks down at this size.
+ */
 const GLYPH = [
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '<path d="M3.5 2.75h9v10.5L8 10.4l-4.5 2.85V2.75Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>',
-  '<path d="M8 5.1v3.4M6.3 6.8h3.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-width="1" aria-hidden="true">',
+  '<path d="M8 2V14" stroke="currentColor"/>',
+  '<path d="M2 8H14" stroke="currentColor"/>',
   '</svg>',
 ].join('')
 

@@ -14,8 +14,17 @@ export const zh = {
   'trigger.tooltip': '快捷方式：把一条发言发送到它对应的会话',
 
   'menu.empty': '还没有快捷方式。可以在消息气泡上点「加入快捷方式」，或在设置里添加。',
-  'menu.footerHint': '设置 → 快捷方式 可管理全部快捷方式',
+  'menu.about': '关于此菜单',
   'menu.loadFailed': '读取快捷方式失败',
+
+  'about.title': '关于「快捷方式」菜单',
+  'about.plugin': '这个菜单由 DeepSeek Harness 插件「快捷方式」（dsh-shortcut）提供：把一段发言和它要发往的会话存成一条快捷方式，之后点一下就能把内容发送到那个会话，不用切换会话。',
+  'about.add': '添加：在你自己的消息气泡上点「加入快捷方式」（复制按钮左边），输入名称并确定；也可以在「设置 → 快捷方式」里点「添加快捷方式」手动创建。',
+  'about.edit': '编辑：在「设置 → 快捷方式」里点某一条的「编辑」，可以修改名称、目标会话和内容。',
+  'about.delete': '删除：在「设置 → 快捷方式」里点某一条的「删除」，确认后即删除，无法撤销。',
+  'about.use': '使用：点这个菜单里的任意一条，内容会发送到它对应的会话，你正在看的会话保持不变。',
+  'about.storage': '条目保存在 $DSH_HOME/shortcut/entries.json，重启 DSH 后仍然保留。',
+  'about.close': '知道了',
 
   'bubble.add': '加入快捷方式',
 
@@ -79,8 +88,17 @@ export const en: Record<ShortcutKey, string> = {
   'trigger.tooltip': 'Shortcuts: send a saved message into its session',
 
   'menu.empty': 'No shortcuts yet. Add one from a message bubble, or from Settings.',
-  'menu.footerHint': 'Manage them all under Settings → Shortcuts',
+  'menu.about': 'About this menu',
   'menu.loadFailed': 'Could not load shortcuts',
+
+  'about.title': 'About the Shortcuts menu',
+  'about.plugin': 'This menu is provided by the DeepSeek Harness plugin "Shortcuts" (dsh-shortcut): it saves a message together with the session it targets, so one click sends that message there without switching sessions.',
+  'about.add': 'Add: press "Add to shortcuts" on one of your own message bubbles (left of the copy control), name it and confirm; or press "Add shortcut" under Settings → Shortcuts to create one by hand.',
+  'about.edit': 'Edit: under Settings → Shortcuts press "Edit" on a row to change its name, target session or content.',
+  'about.delete': 'Delete: under Settings → Shortcuts press "Delete" on a row and confirm; this cannot be undone.',
+  'about.use': 'Use: press any row in this menu and its text is sent to its target session, while the conversation you are reading stays put.',
+  'about.storage': 'Records live in $DSH_HOME/shortcut/entries.json and survive a DSH restart.',
+  'about.close': 'Got it',
 
   'bubble.add': 'Add to shortcuts',
 

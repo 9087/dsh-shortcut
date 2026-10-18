@@ -19,6 +19,11 @@ Opening the entry lists every saved shortcut; pressing one sends its text:
 
 ![The shortcut menu open at the sidebar foot](docs/images/shortcut-menu.en.png)
 
+The menu's last item, **About this menu**, says which plugin provides it and how records are added,
+edited and deleted:
+
+![The About this menu dialog](docs/images/shortcut-about.en.png)
+
 ## Features
 
 - **Sidebar-foot menu, one click, no navigation**: a "Shortcuts" row sits between other plugins'
