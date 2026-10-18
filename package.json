@@ -4,6 +4,31 @@
   "description": "DeepSeek Harness plugin: saved shortcuts (name + target agent + text) with a workspace/session/agent tree picker, a sidebar menu that delivers a shortcut's text to its target without switching sessions, and per-message capture from user bubbles",
   "packageManager": "pnpm@11.22.0",
   "author": "Wu Zhiwei",
+  "license": "MIT",
+  "homepage": "https://github.com/9087/dsh-shortcut#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/9087/dsh-shortcut.git"
+  },
+  "bugs": {
+    "url": "https://github.com/9087/dsh-shortcut/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "shortcut",
+    "prompt",
+    "sessions",
+    "subagents"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

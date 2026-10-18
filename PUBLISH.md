@@ -7,10 +7,14 @@
    npm view dsh-shortcut version --registry=https://registry.npmjs.org
    ```
    A `404` means free. Never use the plural `dsh-shortcuts` (taken).
-2. **Registry**: this machine cannot reach `registry.npmjs.org` directly. Either pass
-   `--registry=https://registry.npmjs.org` from a network that can, or publish through a
-   registry proxy. `registry.npmmirror.com` is a read mirror and does not accept publishes.
-3. **npm login** as the package owner (`npm whoami`).
+2. **Registry**: `registry.npmjs.org` is reachable from this machine (verified 2026-10-19);
+   this repo's `.npmrc` points installs at the npmmirror read mirror, so publishing must pass
+   `--registry=https://registry.npmjs.org` explicitly (or rely on `publishConfig.registry`).
+   `registry.npmmirror.com` does not accept publishes.
+3. **npm login** as the package owner (`npm login --registry=https://registry.npmjs.org`,
+   then `npm whoami --registry=https://registry.npmjs.org`). A stale token in the user-level
+   `.npmrc` fails `whoami` with `401` — log in again or replace
+   `//registry.npmjs.org/:_authToken` with a fresh automation token.
 
 ## Local gate (must be green)
 

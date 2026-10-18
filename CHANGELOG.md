@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-10-19
+
+First release. Tested against `@deepseek-ai/dsh` 0.2.0-rc.2.
 
 - **A target is a session, or one agent inside it.** The add/edit dialog and the Settings "Add shortcut" flow use a tree picker: workspace → session, expanded on demand. Pressing a session row targets its **main agent** — there is no redundant "main agent" child row. A session that really has child agents gets an expand chevron (never drawn for a leaf, and only after its catalog is known): expanding it lists its continuable subagents (labelled by the delegation's work description) and agent-team members (by member name), and a subagent that delegates further becomes a branch. One-shot/unknown-mode subagents and non-active team members are shown but greyed out with the reason, and a search box filters the tree.
 - **Two delivery paths.** Main agents still go through the host Session Controller; subagents and team members go through the host subagent runtime (`ctx.subagents.prompt`, `mode: 'continuable'`, `delivery: 'queue'`), which is the only supported way to address a child session. New classified failures: `target-not-resumable` (one-shot child), `parent-unavailable` (child's parent session is not running), `target-unavailable` (unreachable/invalid child); `session/agent-busy` with the subagent-routing reason is no longer misreported as "busy".
@@ -13,13 +15,4 @@
 - **The shortcut menu opens to the right of its sidebar trigger**, into the content area instead of above the sidebar foot, with its **bottom edge lined up with the button's bottom edge** (taught through `Menu`'s `getAnchorRect`: the synthetic anchor's top is `button.bottom − menuHeight`, re-measured each frame). It stays close to the shell's own menu scale — a ~260px card, 32px rows, 13px labels — just a touch roomier (E2E checks right-side placement, ≥240px width, ≥30px rows and ≤12px bottom-edge offset).
 - **The Settings header action is placed between the description and the list**: on every width it sits directly under the intro (so it never squeezes the title or overlaps the text) and just above the records list. On wide screens it keeps its natural single-line width with a plus icon; only on narrow screens (≤640px) does it stretch to the full row.
 - New docs screenshot `shortcut-picker{,.en}.png`; both READMEs and the "About this menu" dialog describe agent targets.
-
-## 0.1.0
-
-First release.
-
-- Sidebar-foot "快捷方式" entry (directly above Settings) listing every shortcut; pressing one delivers its text into the target session in the background, with a success/failure banner.
-- "加入快捷方式" button injected immediately left of the copy control on every durable user message; its dialog is seeded with that bubble's text and locks the target session to the bubble's own session.
-- Settings tab "快捷方式": list, edit name/content, delete with confirmation, and create by hand (target session picked from the client session list).
-- Durable store at `$DSH_HOME/shortcut/entries.json` (atomic write, corrupt-file reporting), served/delivered by a host RPC channel through the host Session Controller.
-- zh/en dictionaries; plugin loads on `@deepseek-ai/dsh` 0.2.0-rc.2.
+- **Baseline surface:** sidebar-foot "快捷方式" entry above Settings, per-bubble "加入快捷方式" capture left of the copy control, Settings tab with list/edit/delete/manual create, a success/failure banner for every delivery, zh/en dictionaries, and a durable atomic store at `$DSH_HOME/shortcut/entries.json` served through a host RPC channel.
