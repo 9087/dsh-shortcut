@@ -79,8 +79,6 @@ On narrow screens the add action becomes a full-width row directly under the int
 
 ## Install
 
-Once published to npm:
-
 ```sh
 dsh plugin --profile web add dsh-shortcut
 ```
@@ -91,7 +89,7 @@ Or, if you run the harness through npx:
 npx @deepseek-ai/dsh plugin --profile web add dsh-shortcut
 ```
 
-From a checkout (what this repository supports today):
+From a checkout:
 
 ```sh
 dsh plugin --profile web add /path/to/dsh-shortcut

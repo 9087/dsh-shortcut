@@ -69,8 +69,6 @@
 
 ## 安装
 
-已发布到 npm 后：
-
 ```sh
 dsh plugin --profile web add dsh-shortcut
 ```
@@ -81,7 +79,7 @@ dsh plugin --profile web add dsh-shortcut
 npx @deepseek-ai/dsh plugin --profile web add dsh-shortcut
 ```
 
-从本地目录安装（当前仓库支持的方式）：
+从本地目录安装：
 
 ```sh
 dsh plugin --profile web add /path/to/dsh-shortcut
