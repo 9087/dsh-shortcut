@@ -174,6 +174,13 @@ async function captureLocale(data) {
     await page.screenshot({ path: join('docs', 'images', `shortcut-settings${data.suffix}.png`) })
     step(`${data.locale}: settings shot`)
 
+    // Narrow layout: the add action becomes a full-width row under the intro.
+    await page.setViewportSize({ width: 620, height: 820 })
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join('docs', 'images', `shortcut-settings-narrow${data.suffix}.png`) })
+    await page.setViewportSize({ width: 1400, height: 900 })
+    step(`${data.locale}: narrow settings shot`)
+
     // The target tree is inline in the dialog (no dropdown to open).
     await page.locator('[data-dsh-shortcut-settings-add]').click()
     await page.locator('[data-dsh-shortcut-name]').waitFor({ state: 'visible', timeout: 15_000 })

@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconPlusOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { bannerStore, editorStore, mountedHosts, useEditor } from '../editor.ts'
 import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
@@ -74,13 +74,17 @@ export function ShortcutSettingsSection({ t }: SettingsSectionProps): ReactNode 
           <h2 className={css.settingsTitle}>{t('settings.title')}</h2>
           <p className={css.settingsIntro}>{t('settings.intro')}</p>
         </div>
-        <Button
-          variant="primary"
-          data-dsh-shortcut-settings-add=""
-          onClick={() => { editorStore.openCreate() }}
-        >
-          {t('settings.add')}
-        </Button>
+        <div className={css.settingsHeaderActions}>
+          <Button
+            variant="primary"
+            className={css.settingsAddButton}
+            data-dsh-shortcut-settings-add=""
+            onClick={() => { editorStore.openCreate() }}
+          >
+            <IconPlusOutlineRegular size={16} />
+            <span>{t('settings.add')}</span>
+          </Button>
+        </div>
       </div>
 
       {list.phase === 'error' && (

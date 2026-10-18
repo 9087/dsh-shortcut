@@ -63,6 +63,10 @@
 
 ![快捷方式设置页签](docs/images/shortcut-settings.png)
 
+窄屏下「添加快捷方式」会变成描述文字正下方的一整行：
+
+![窄屏设置页布局](docs/images/shortcut-settings-narrow.png)
+
 ## 安装
 
 已发布到 npm 后：

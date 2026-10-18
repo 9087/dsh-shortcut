@@ -135,13 +135,35 @@
 
 .settingsHeader {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
 .settingsHeaderText {
   min-width: 0;
+}
+
+.settingsHeaderActions {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* The primary action sits between the description and the list: one line at its
+   natural width on wide screens, stretched to the full row only on narrow ones. */
+.settingsAddButton {
+  flex: none;
+  gap: 6px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .settingsAddButton {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .settingsTitle {

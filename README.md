@@ -73,6 +73,10 @@ The Settings page:
 
 ![The Shortcuts settings tab](docs/images/shortcut-settings.en.png)
 
+On narrow screens the add action becomes a full-width row directly under the intro:
+
+![Narrow settings layout](docs/images/shortcut-settings-narrow.en.png)
+
 ## Install
 
 Once published to npm:

@@ -263,6 +263,43 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     const row = page.locator('[data-dsh-shortcut-row]').filter({ hasText: SHORTCUT_NAME })
     await expect(row).toBeVisible({ timeout: 15_000 })
 
+    // Narrow screens: the add action becomes a full-width row between the intro
+    // paragraph and the list, instead of a squeezed control beside the title.
+    await page.setViewportSize({ width: 480, height: 900 })
+    const addAction = page.locator('[data-dsh-shortcut-settings-add]')
+    const intro = page.locator('[data-dsh-shortcut-settings] p').first()
+    const firstRow = page.locator('[data-dsh-shortcut-row]').first()
+    const [addBox, introBox, rowBox, pageBox] = await Promise.all([
+      addAction.boundingBox(), intro.boundingBox(), firstRow.boundingBox(),
+      page.locator('[data-dsh-shortcut-settings]').boundingBox(),
+    ])
+    expect(addBox).not.toBeNull()
+    expect(introBox).not.toBeNull()
+    expect(rowBox).not.toBeNull()
+    expect(pageBox).not.toBeNull()
+    expect(addBox!.width).toBeGreaterThanOrEqual(pageBox!.width * 0.9)
+    expect(addBox!.y).toBeGreaterThan(introBox!.y + introBox!.height - 2)
+    // No huge blank between the intro and the full-width action row.
+    expect(addBox!.y - (introBox!.y + introBox!.height)).toBeLessThanOrEqual(24)
+    expect(addBox!.y + addBox!.height).toBeLessThanOrEqual(rowBox!.y + 2)
+    await page.setViewportSize({ width: 1400, height: 900 })
+    await expect(addAction).toBeVisible()
+    // Wide: same placement (under the intro, above the list) but at its natural
+    // width — the button is never stretched across the header.
+    const [wideAdd, wideIntro, wideRow, widePage] = await Promise.all([
+      addAction.boundingBox(),
+      page.locator('[data-dsh-shortcut-settings] p').first().boundingBox(),
+      page.locator('[data-dsh-shortcut-row]').first().boundingBox(),
+      page.locator('[data-dsh-shortcut-settings]').boundingBox(),
+    ])
+    expect(wideAdd).not.toBeNull()
+    expect(wideIntro).not.toBeNull()
+    expect(wideRow).not.toBeNull()
+    expect(widePage).not.toBeNull()
+    expect(wideAdd!.y).toBeGreaterThan(wideIntro!.y + wideIntro!.height - 2)
+    expect(wideAdd!.width).toBeLessThan(widePage!.width * 0.6)
+    expect(wideAdd!.y + wideAdd!.height).toBeLessThanOrEqual(wideRow!.y + 2)
+
     // --- edit the name
     await row.locator('[data-dsh-shortcut-edit]').click()
     const name = page.locator('[data-dsh-shortcut-name]')
