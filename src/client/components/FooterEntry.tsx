@@ -23,7 +23,7 @@ import { bannerStore, mountedHosts } from '../editor.ts'
 import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
-import { titleOf, useSessionRows } from '../sessions.ts'
+import { targetShortLabel } from '../catalog.ts'
 import { ShortcutIcon } from './ShortcutIcon.tsx'
 import { ShortcutEditorDialog } from './EditorDialog.tsx'
 import { ShortcutAboutDialog } from './AboutDialog.tsx'
@@ -49,7 +49,6 @@ export interface FooterEntryProps {
  */
 export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   const list = useEntries()
-  const rows = useSessionRows()
   const [open, setOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
 
@@ -83,7 +82,7 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
     setOpen(false)
     try {
       const receipt = await entriesStore.send(id)
-      bannerStore.show(t('toast.sent', { session: titleOf(rows, receipt.sessionId) }), { tone: 'success' })
+      bannerStore.show(t('toast.sent', { target: targetShortLabel(receipt.target, receipt.sessionId, t) }), { tone: 'success' })
     } catch (error: unknown) {
       const code = error instanceof ShortcutFailure ? error.code : 'send-failed'
       bannerStore.show(errorText(t, code), { holdMs: 6000 })

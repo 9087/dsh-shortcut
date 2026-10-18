@@ -2,8 +2,8 @@
  * Documentation screenshots for both READMEs.
  *
  * Boots one throwaway `dsh web` per language, drives the real GUI through the
- * whole story (capture from a bubble, menu, delivery, Settings), and writes the
- * five images under `docs/images/`:
+ * whole story (capture from a bubble, menu, delivery, Settings, target picker),
+ * and writes the six images under `docs/images/`:
  *
  *   shortcut-*.png      Chinese UI, used by README.zh.md
  *   shortcut-*.en.png   English UI, used by README.md
@@ -173,6 +173,19 @@ async function captureLocale(data) {
     await page.waitForTimeout(500)
     await page.screenshot({ path: join('docs', 'images', `shortcut-settings${data.suffix}.png`) })
     step(`${data.locale}: settings shot`)
+
+    // The target tree is inline in the dialog (no dropdown to open).
+    await page.locator('[data-dsh-shortcut-settings-add]').click()
+    await page.locator('[data-dsh-shortcut-name]').waitFor({ state: 'visible', timeout: 15_000 })
+    const picker = page.locator('[data-dsh-shortcut-picker]')
+    await picker.waitFor({ state: 'visible', timeout: 15_000 })
+    // The tree opens with workspaces collapsed; press the first one to expand it.
+    await picker.locator('[data-dsh-shortcut-tree-workspace]').first().click()
+    const pickerSession = picker.locator('[data-dsh-shortcut-tree-session]').first()
+    await pickerSession.waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: join('docs', 'images', `shortcut-picker${data.suffix}.png`) })
+    step(`${data.locale}: picker shot`)
   } finally {
     if (browser !== undefined) await browser.close().catch(() => {})
     if (host !== undefined) await stopHost(host.proc)

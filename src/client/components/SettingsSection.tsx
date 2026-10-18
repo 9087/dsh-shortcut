@@ -16,7 +16,7 @@ import { bannerStore, editorStore, mountedHosts, useEditor } from '../editor.ts'
 import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
-import { titleOf, useSessionRows } from '../sessions.ts'
+import { resolveTargetPath, useCatalogRevision } from '../catalog.ts'
 import { ShortcutEditorDialog } from './EditorDialog.tsx'
 import { BannerHost } from './BannerHost.tsx'
 import { ShortcutFailure } from '../api.ts'
@@ -36,7 +36,7 @@ export interface SettingsSectionProps {
  */
 export function ShortcutSettingsSection({ t }: SettingsSectionProps): ReactNode {
   const list = useEntries()
-  const rows = useSessionRows()
+  useCatalogRevision()
   const editor = useEditor()
   const [pendingDelete, setPendingDelete] = useState<string | undefined>(undefined)
   const [deleteFailure, setDeleteFailure] = useState<string | undefined>(undefined)
@@ -108,7 +108,7 @@ export function ShortcutSettingsSection({ t }: SettingsSectionProps): ReactNode 
                   <div className={css.rowMain}>
                     <span className={css.rowName}>{entry.name}</span>
                     <span className={css.rowMeta}>
-                      {t('settings.session')}：{titleOf(rows, entry.sessionId)}
+                      {t('settings.target')}：{resolveTargetPath(entry.target, entry.sessionId, t)}
                     </span>
                     <span className={css.rowText}>{entry.text}</span>
                   </div>

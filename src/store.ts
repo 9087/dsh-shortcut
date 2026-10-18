@@ -6,6 +6,10 @@
  * two browser tabs cannot interleave a read-modify-write, and a failed write
  * leaves both the disk and the in-memory list at their previous state.
  *
+ * Schema version 2 added the agent target. Version 1 records (session id only)
+ * are read as `kind: 'main'` and are rewritten as version 2 on the next write,
+ * so an existing shortcuts file keeps working.
+ *
  * A corrupt or unreadable file is a REPORTED failure (`store-unavailable`)
  * rather than an empty list: silently answering "no shortcuts" would invite
  * the reader to re-add everything on top of a file that is merely malformed,
@@ -19,9 +23,9 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { writeJsonAtomic } from './atomic-write.ts'
-import { validateDraft } from './share.ts'
+import { isTargetKind, validateDraft } from './share.ts'
 import { STORE_VERSION } from './types.ts'
-import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutFile } from './types.ts'
+import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutFile, ShortcutTarget } from './types.ts'
 import type { ShortcutErrorCode } from './types.ts'
 
 /** A business failure the channel turns into a structured RPC error. */
@@ -45,16 +49,72 @@ export function defaultShortcutDir(): string {
   return join(home === undefined || home.length === 0 ? join(homedir(), '.dsh') : home, 'shortcut')
 }
 
-/** Whether a parsed value is one we can serve. */
-function isEntry(value: unknown): value is ShortcutEntry {
-  if (typeof value !== 'object' || value === null) return false
-  const row = value as Record<string, unknown>
+/** Common fields of one stored record. */
+function commonFields(row: Record<string, unknown>): boolean {
   return typeof row.id === 'string' && row.id.length > 0
     && typeof row.name === 'string'
-    && typeof row.sessionId === 'string'
+    && typeof row.sessionId === 'string' && row.sessionId.length > 0
     && typeof row.text === 'string'
     && typeof row.createdAt === 'number'
     && typeof row.updatedAt === 'number'
+}
+
+/** Optional label fields a target may carry, all strings when present. */
+function optionalLabels(value: Record<string, unknown>): boolean {
+  for (const key of ['workspaceTitle', 'sessionTitle', 'leafLabel', 'path'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return false
+  }
+  const ancestors = value.ancestors
+  if (ancestors !== undefined) {
+    if (!Array.isArray(ancestors) || ancestors.length === 0 || ancestors.length > 32) return false
+    if (!ancestors.every(id => typeof id === 'string' && id.length > 0)) return false
+    if (new Set(ancestors).size !== ancestors.length) return false
+  }
+  return true
+}
+
+/** Whether a v2 target is a coherent address. */
+export function isStoredTarget(value: unknown, sessionId: string): value is ShortcutTarget {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const target = value as Record<string, unknown>
+  if (!isTargetKind(target.kind)) return false
+  if (target.kind === 'main') {
+    if (target.childSessionId !== undefined || target.ancestors !== undefined) return false
+  } else {
+    if (typeof target.childSessionId !== 'string'
+      || target.childSessionId.length === 0
+      || target.childSessionId === sessionId) {
+      return false
+    }
+    if (Array.isArray(target.ancestors) && target.ancestors[target.ancestors.length - 1] !== sessionId) return false
+  }
+  return optionalLabels(target)
+}
+
+/** Whether a parsed value is a version-2 record. */
+function isEntry(value: unknown): value is ShortcutEntry {
+  if (typeof value !== 'object' || value === null) return false
+  const row = value as Record<string, unknown>
+  return commonFields(row) && isStoredTarget(row.target, row.sessionId as string)
+}
+
+/** Whether a parsed value is a legacy version-1 record. */
+function isLegacyEntry(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false
+  return commonFields(value as Record<string, unknown>)
+}
+
+/** Upgrade one v1 record: a session-id-only shortcut addressed the main agent. */
+function migrateLegacy(entry: Record<string, unknown>): ShortcutEntry {
+  return {
+    id: entry.id as string,
+    name: entry.name as string,
+    sessionId: entry.sessionId as string,
+    text: entry.text as string,
+    target: { kind: 'main' },
+    createdAt: entry.createdAt as number,
+    updatedAt: entry.updatedAt as number,
+  }
 }
 
 /** Parse the file's bytes into records, or say why it cannot be trusted. */
@@ -68,14 +128,19 @@ function parseFile(text: string): ShortcutEntry[] {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new StoreFailure('store-unavailable', 'entries.json is not a shortcut file')
   }
-  const file = parsed as Partial<ShortcutFile>
+  const file = parsed as { version?: unknown; entries?: unknown }
+  if (!Array.isArray(file.entries)) {
+    throw new StoreFailure('store-unavailable', 'entries.json has no entries list')
+  }
+  if (file.version === 1) {
+    if (!file.entries.every(isLegacyEntry)) throw new StoreFailure('store-unavailable', 'entries.json has malformed entries')
+    return file.entries.map(migrateLegacy)
+  }
   if (file.version !== STORE_VERSION) {
     throw new StoreFailure('store-unavailable', `entries.json has unsupported version ${String(file.version)}`)
   }
-  if (!Array.isArray(file.entries) || !file.entries.every(isEntry)) {
-    throw new StoreFailure('store-unavailable', 'entries.json has malformed entries')
-  }
-  return file.entries.map(entry => ({ ...entry }))
+  if (!file.entries.every(isEntry)) throw new StoreFailure('store-unavailable', 'entries.json has malformed entries')
+  return file.entries.map(entry => ({ ...entry, target: { ...entry.target } }))
 }
 
 /** The host-side record store. */
@@ -146,7 +211,7 @@ export class ShortcutStore {
    */
   async list(): Promise<ShortcutEntry[]> {
     const entries = await this.load()
-    return entries.map(entry => ({ ...entry }))
+    return entries.map(entry => ({ ...entry, target: { ...entry.target } }))
   }
 
   /**
@@ -157,7 +222,7 @@ export class ShortcutStore {
   async get(id: string): Promise<ShortcutEntry | undefined> {
     const entries = await this.load()
     const found = entries.find(entry => entry.id === id)
-    return found === undefined ? undefined : { ...found }
+    return found === undefined ? undefined : { ...found, target: { ...found.target } }
   }
 
   /**
@@ -170,8 +235,8 @@ export class ShortcutStore {
       const checked = validateDraft(entries, draft)
       if (!checked.ok) {
         throw new StoreFailure(checked.problem, checked.problem === 'name-taken'
-          ? `a shortcut named ${draft.name.trim()} already exists`
-          : 'name, session and text are required')
+          ? `a shortcut named ${String(draft.name).trim()} already exists`
+          : 'name, session, target and text are required')
       }
       const now = Date.now()
       const entry: ShortcutEntry = {
@@ -179,11 +244,12 @@ export class ShortcutStore {
         name: checked.draft.name,
         sessionId: checked.draft.sessionId,
         text: checked.draft.text,
+        target: { ...checked.draft.target },
         createdAt: now,
         updatedAt: now,
       }
       await this.persist([...entries, entry])
-      return { ...entry }
+      return { ...entry, target: { ...entry.target } }
     })
   }
 
@@ -199,15 +265,22 @@ export class ShortcutStore {
       const checked = validateDraft(entries, edit.draft, edit.id)
       if (!checked.ok) {
         throw new StoreFailure(checked.problem, checked.problem === 'name-taken'
-          ? `a shortcut named ${edit.draft.name.trim()} already exists`
-          : 'name, session and text are required')
+          ? `a shortcut named ${String(edit.draft.name).trim()} already exists`
+          : 'name, session, target and text are required')
       }
       const existing = entries[index]
       if (existing === undefined) throw new StoreFailure('not-found', `no shortcut with id ${edit.id}`)
-      const updated: ShortcutEntry = { ...existing, ...checked.draft, updatedAt: Date.now() }
+      const updated: ShortcutEntry = {
+        ...existing,
+        name: checked.draft.name,
+        sessionId: checked.draft.sessionId,
+        text: checked.draft.text,
+        target: { ...checked.draft.target },
+        updatedAt: Date.now(),
+      }
       const next = entries.map(entry => entry.id === edit.id ? updated : entry)
       await this.persist(next)
-      return { ...updated }
+      return { ...updated, target: { ...updated.target } }
     })
   }
 

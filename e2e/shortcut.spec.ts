@@ -36,12 +36,14 @@ const LOCALE: 'zh' | 'en' = process.env.E2E_LOCALE === 'en' ? 'en' : 'zh'
 
 /** The text captured from a bubble and later delivered by the menu. */
 const CAPTURE_TEXT = LOCALE === 'en' ? 'Restart the dev service' : '重启服务：请重启 dev 服务'
-/** A substring of CAPTURE_TEXT that identifies that session in the sidebar. */
-const CAPTURE_PROBE = LOCALE === 'en' ? 'Restart the dev service' : '请重启 dev 服务'
+/** A substring of CAPTURE_TEXT that identifies that session in the sidebar.
+ * Short on purpose: the sidebar truncates long generated titles, so a probe
+ * longer than the visible prefix would stop matching on an English run. */
+const CAPTURE_PROBE = LOCALE === 'en' ? 'Restart the dev' : '请重启 dev 服务'
 /** The second session's own message; used to prove the view did not switch. */
 const OTHER_TEXT = LOCALE === 'en' ? 'This is the second session message' : '这是第二个会话的消息'
-/** A substring of OTHER_TEXT that identifies that session in the sidebar. */
-const OTHER_PROBE = LOCALE === 'en' ? 'second session message' : '第二个会话的消息'
+/** A substring of OTHER_TEXT that identifies that session in the sidebar (short for the same reason). */
+const OTHER_PROBE = LOCALE === 'en' ? 'second session' : '第二个会话的消息'
 /** The name typed into the capture dialog. */
 const SHORTCUT_NAME = LOCALE === 'en' ? 'Restart service' : '重启服务'
 /** The renamed record after the Settings edit. */
@@ -99,6 +101,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
 
     const workspaceTitle = fixture.workspace.split(/[\\/]/).pop() ?? 'workspace'
     sessionA = await beginSession(page, workspaceTitle, fixture.home, CAPTURE_TEXT)
+    // The fixture has no model credentials, so that first turn fails fast. Wait for
+    // it to SETTLE before any test sends a shortcut: a message admitted while the
+    // session's only turn is still running goes into the agent's queue, and a
+    // queued prompt does not reach the durable log at the same moment — which made
+    // the delivery assertion below depend on when the first turn happened to end.
+    await settleTurn(page)
   })
 
   test.afterAll(async () => {
@@ -182,7 +190,12 @@ test.describe('dsh-shortcut (real Chromium)', () => {
 
     await expect.poll(() => storedEntries().length, { timeout: 10_000 }).toBe(1)
     const [entry] = storedEntries()
-    expect(entry).toMatchObject({ name: SHORTCUT_NAME, sessionId: sessionA, text: CAPTURE_TEXT })
+    expect(entry).toMatchObject({
+      name: SHORTCUT_NAME,
+      sessionId: sessionA,
+      text: CAPTURE_TEXT,
+      target: { kind: 'main' },
+    })
   })
 
   test('3. the menu has an About item, and delivers into the original session without switching the view', async () => {
@@ -223,11 +236,20 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(originalRow).toBeVisible({ timeout: 15_000 })
     await originalRow.click()
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toBeAttached({ timeout: 15_000 })
-    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 15_000 })
+    try {
+      await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 30_000 })
+    } catch (error) {
+      const bubbles = await page.locator('[data-chat-flow-kind="user"]').allInnerTexts()
+      const main = await page.locator('body').innerText()
+      console.log('[e2e debug] user bubbles:', JSON.stringify(bubbles))
+      console.log('[e2e debug] body:', main.slice(0, 3000))
+      throw error
+    }
 
     // And the session the reader was in received nothing.
     const secondRow = page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first()
-    await secondRow.click()
+    await expect(secondRow).toBeVisible({ timeout: 20_000 })
+    await secondRow.click({ timeout: 20_000 })
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(1)
   })
@@ -245,22 +267,48 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await row.locator('[data-dsh-shortcut-edit]').click()
     const name = page.locator('[data-dsh-shortcut-name]')
     await expect(name).toHaveValue(SHORTCUT_NAME)
+    // Reopening at a stored target expands its workspace and brings the
+    // selected row into view without any extra click.
+    await expect(page.locator('[data-dsh-shortcut-picker] [data-dsh-shortcut-selected]'))
+      .toBeVisible({ timeout: 15_000 })
     await name.fill(RENAMED)
     await page.locator('[data-dsh-shortcut-confirm]').click()
     await expect(page.locator('[data-dsh-shortcut-row]').filter({ hasText: RENAMED })).toBeVisible({ timeout: 10_000 })
     expect(storedEntries().map(entry => entry.name)).toEqual([RENAMED])
 
-    // --- add a record by hand (target picked from the session list)
+    // --- add a record by hand, picking the target from the tree
     await page.locator('[data-dsh-shortcut-settings-add]').click()
     const confirm = page.locator('[data-dsh-shortcut-confirm]')
     await expect(confirm).toBeDisabled()
     await name.fill(MANUAL_NAME)
-    await page.locator('[data-dsh-shortcut-session-picker]').click()
-    await page.getByRole('menuitem').first().click()
+
+    // The target tree is inline in the dialog — there is no dropdown to open.
+    const picker = page.locator('[data-dsh-shortcut-picker]')
+    await expect(picker).toBeVisible({ timeout: 10_000 })
+    // Group rows wear the native folder icon; target rows do not. The tree opens
+    // with workspaces collapsed, so the first press expands it.
+    const workspaceRow = picker.locator('[data-dsh-shortcut-tree-workspace]').first()
+    await expect(workspaceRow.locator('[data-dsh-shortcut-group-icon] svg')).toHaveCount(1)
+    await workspaceRow.click()
+    const treeSession = picker.locator('[data-dsh-shortcut-tree-session]').first()
+    await expect(treeSession).toBeVisible({ timeout: 20_000 })
+    await expect(treeSession.locator('[data-dsh-shortcut-group-icon]')).toHaveCount(0)
+    await treeSession.click()
+    // The read-only path line now shows workspace / session (no agent segment).
+    await expect(page.locator('[data-dsh-shortcut-target]')).toContainText('/')
+
     await page.locator('[data-dsh-shortcut-text]').fill(MANUAL_TEXT)
     await expect(confirm).toBeEnabled()
     await confirm.click()
     await expect(page.locator('[data-dsh-shortcut-row]')).toHaveCount(2, { timeout: 10_000 })
+    // The row shows the workspace / session path of its main-agent target.
+    const workspaceTitle = fixture.workspace.split(/[\\/]/).pop() ?? 'workspace'
+    const manualRow = page.locator('[data-dsh-shortcut-row]').filter({ hasText: MANUAL_NAME })
+    await expect(manualRow).toContainText('/')
+    await expect(manualRow).toContainText(workspaceTitle)
+    const manualEntry = storedEntries().find(entry => entry.name === MANUAL_NAME)
+    expect(manualEntry?.target).toMatchObject({ kind: 'main' })
+    expect(typeof manualEntry?.target.path).toBe('string')
 
     // --- delete the manual record
     await page.locator('[data-dsh-shortcut-row]').filter({ hasText: MANUAL_NAME })
@@ -287,17 +335,25 @@ test.describe('dsh-shortcut (real Chromium)', () => {
 })
 
 /** Read the plugin's own store file from the throwaway home. */
-function storedEntries(): Array<{ name: string; sessionId: string; text: string }> {
+function storedEntries(): Array<{ name: string; sessionId: string; text: string; target?: { kind?: string; path?: string } }> {
   try {
     const file = join(fixture.home, 'shortcut', 'entries.json')
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as { entries?: unknown }
-    return Array.isArray(parsed.entries) ? parsed.entries as Array<{ name: string; sessionId: string; text: string }> : []
+    return Array.isArray(parsed.entries)
+      ? parsed.entries as Array<{ name: string; sessionId: string; text: string; target?: { kind?: string; path?: string } }>
+      : []
   } catch {
     return []
   }
 }
 
-/** Keep the failure dump useful while the fixture is still around. */
+/** Wait until the session on screen has finished its turn (done or failed). */
+async function settleTurn(page: Page): Promise<void> {
+  await expect(page.getByText(/处理失败|已完成|Failed|Done|invalid API key|API 密钥无效/i).first())
+    .toBeVisible({ timeout: 30_000 })
+}
+
+/** Size of one session's durable log, or 0 when it cannot be found. */
 test.afterEach(async () => {
   if (test.info().status === 'failed' && fixture !== undefined) {
     console.log(`[e2e] home: ${fixture.home}\n${describeHome(fixture.home)}`)

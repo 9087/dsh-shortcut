@@ -2,33 +2,53 @@
  * The one add/edit dialog, shared by the message-bubble capture and the
  * Settings page.
  *
- * Fields: name, target session, content. The confirm button is enabled only
- * when the whole draft is valid — non-blank name, unused name, a chosen target
- * session, non-blank content — and the host re-checks the same rules, so a
- * race between two tabs is still refused with a readable reason rather than
- * silently overwriting.
+ * Fields: name, target (workspace → session → agent), content. The confirm
+ * button is enabled only when the whole draft is valid — non-blank name,
+ * unused name, a chosen target agent, non-blank content — and the host
+ * re-checks the same rules, so a race between two tabs is still refused with a
+ * readable reason rather than silently overwriting.
  *
- * A bubble capture locks the target to the bubble's own session (that IS the
- * shortcut source); a manual create picks one from the client session list.
+ * A bubble capture locks the target to that bubble's own session and addresess
+ * its main agent (that IS the shortcut source); a manual create/edit picks any
+ * leaf from the tree picker.
  *
  * @module dsh-shortcut/client/components/EditorDialog
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { Button, Input, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useRef } from 'react'
+import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { bannerStore, editorStore, useEditor } from '../editor.ts'
 import { useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
-import { titleOf, useSessionRows } from '../sessions.ts'
+import { resolveTargetPath } from '../catalog.ts'
 import { validateDraft } from '../../share.ts'
+import { SessionTreePicker } from './SessionTreePicker.tsx'
 import css from '../styles.module.css'
 import type { ReactNode } from 'react'
 
 /** Props for the dialog host: the framework's localizer. */
 export interface EditorDialogProps {
+  /** The framework's localizer for this plugin's namespace. */
   t: Translate
+}
+
+/** The target descriptor the current dialog state stands for. */
+function draftTarget(state: ReturnType<typeof useEditor>): ShortcutTargetLike {
+  return {
+    kind: state.target.kind,
+    ...(state.target.childSessionId === undefined ? {} : { childSessionId: state.target.childSessionId }),
+    ...(state.target.leafLabel === undefined ? {} : { leafLabel: state.target.leafLabel }),
+    ...(state.target.ancestors === undefined ? {} : { ancestors: [...state.target.ancestors] }),
+  }
+}
+
+/** Minimal target shape `resolveTargetPath` accepts (session id is added separately). */
+interface ShortcutTargetLike {
+  kind: 'main' | 'subagent' | 'member'
+  childSessionId?: string
+  leafLabel?: string
+  ancestors?: string[]
 }
 
 /**
@@ -39,15 +59,12 @@ export interface EditorDialogProps {
 export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
   const state = useEditor()
   const list = useEntries()
-  const rows = useSessionRows()
-  const [sessionMenu, setSessionMenu] = useState(false)
   const nameRef = useRef<HTMLInputElement | null>(null)
 
-  // A reopened dialog must not inherit the previous picker state, and the name
-  // field is where the reader starts: an empty name is always the first gap.
+  // The name field is where the reader starts: an empty name is always the
+  // first gap. The picker owns its own expanded state.
   useEffect(() => {
     if (!state.open) return
-    setSessionMenu(false)
     const handle = requestAnimationFrame(() => { nameRef.current?.focus() })
     return () => { cancelAnimationFrame(handle) }
   }, [state.open])
@@ -55,13 +72,14 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
   const checked = validateDraft(list.entries, {
     name: state.name,
     sessionId: state.sessionId,
+    target: draftTarget(state),
     text: state.text,
   }, state.id)
   const canSubmit = checked.ok && !state.submitting
   const editing = state.mode === 'edit'
 
   const submit = async (): Promise<void> => {
-    const entry = await editorStore.submit()
+    const entry = await editorStore.submit((target, sessionId) => resolveTargetPath(target, sessionId, t))
     if (entry === undefined) return
     bannerStore.show(
       editing ? t('toast.updated', { name: entry.name }) : t('toast.created', { name: entry.name }),
@@ -69,44 +87,22 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
     )
   }
 
-  const sessionItems: MenuEntry[] = rows.length === 0
-    ? [{ type: 'label', id: 'no-sessions', text: t('dialog.noSessions') }]
-    : rows.map(row => ({ id: row.id, label: row.title }))
-  const selectedTitle = state.sessionId === '' ? t('dialog.sessionPlaceholder') : titleOf(rows, state.sessionId)
+  const fixedPath = state.sessionId === ''
+    ? t('picker.placeholder')
+    : resolveTargetPath({ kind: 'main' }, state.sessionId, t)
 
-  const picker = state.sessionFixed
+  const targetField = state.sessionFixed
     ? (
         <div className={css.sessionFixedRow} data-dsh-shortcut-session-fixed="">
-          <span className={css.sessionFixedValue}>{selectedTitle}</span>
+          <span className={css.sessionFixedValue} title={fixedPath}>{fixedPath}</span>
           <span className={css.sessionFixedTag}>{t('dialog.sessionFixed')}</span>
         </div>
       )
     : (
-        <Menu
-          open={sessionMenu}
-          onClose={() => { setSessionMenu(false) }}
-          anchor={(
-            <button
-              type="button"
-              className={css.sessionPicker}
-              data-dsh-shortcut-session-picker=""
-              aria-label={t('dialog.sessionPick')}
-              onClick={() => { setSessionMenu(value => !value) }}
-            >
-              <span className={state.sessionId === '' ? css.sessionPickerEmpty : css.sessionPickerValue}>
-                {selectedTitle}
-              </span>
-            </button>
-          )}
-          items={sessionItems}
-          onSelect={(id) => {
-            if (!rows.some(row => row.id === id)) return
-            editorStore.patch({ sessionId: id })
-            setSessionMenu(false)
-          }}
-          side="bottom"
-          align="start"
-          portal
+        <SessionTreePicker
+          t={t}
+          selection={state.sessionId === '' ? undefined : { sessionId: state.sessionId, target: state.target }}
+          onSelect={(selection) => { editorStore.selectTarget(selection.sessionId, selection.target) }}
         />
       )
 
@@ -120,6 +116,8 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
       onClose={() => { editorStore.close() }}
       title={editing ? t('dialog.editTitle') : t('dialog.createTitle')}
       closeLabel={t('dialog.cancel')}
+      className={css.editorDialog ?? ''}
+      contentClassName={css.editorDialogBody ?? ''}
       footer={(
         <div className={css.dialogFooter}>
           <Button variant="outline" onClick={() => { editorStore.close() }}>{t('dialog.cancel')}</Button>
@@ -134,8 +132,10 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
         </div>
       )}
     >
-      <div className={css.form}>
-        <label className={css.field}>
+      {/* Name spans the full width; below it the target tree sits on the left
+          and the message body on the right — the dialog stays wide, not tall. */}
+      <div className={css.formGrid}>
+        <label className={`${css.field} ${css.formWide}`}>
           <span className={css.fieldLabel}>{t('dialog.nameLabel')}</span>
           <Input
             ref={nameRef}
@@ -146,26 +146,27 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
             onChange={(event) => { editorStore.patch({ name: event.currentTarget.value }) }}
           />
         </label>
-        {state.problem === 'name-taken' && <p className={css.problem}>{t('dialog.nameTaken')}</p>}
+        {state.problem === 'name-taken' && (
+          <p className={`${css.problem} ${css.formWide}`}>{t('dialog.nameTaken')}</p>
+        )}
 
         <div className={css.field}>
-          <span className={css.fieldLabel}>{t('dialog.sessionLabel')}</span>
-          {picker}
+          <span className={css.fieldLabel}>{t('dialog.targetLabel')}</span>
+          {targetField}
         </div>
 
-        <label className={css.field}>
+        <label className={`${css.field} ${css.contentField}`}>
           <span className={css.fieldLabel}>{t('dialog.textLabel')}</span>
           <textarea
-            className={css.textarea}
-            rows={5}
+            className={`${css.textarea} ${css.contentTextarea}`}
             value={state.text}
             placeholder={t('dialog.textPlaceholder')}
             data-dsh-shortcut-text=""
             onChange={(event) => { editorStore.patch({ text: event.currentTarget.value }) }}
           />
         </label>
-        {problem !== undefined && <p className={css.problem}>{problem}</p>}
       </div>
+      {problem !== undefined && <p className={css.problem}>{problem}</p>}
     </Modal>
   )
 }

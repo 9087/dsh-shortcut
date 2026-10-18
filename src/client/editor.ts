@@ -8,6 +8,10 @@
  * the single dialog instance. One banner at a time is enough: deliveries are
  * quick, and the newest outcome is the one the reader needs.
  *
+ * A target is not just a session any more: it is one agent inside it (the main
+ * agent, a continuable subagent, or an agent-team teammate). The dialog owns
+ * that selection; the store serializes it into the wire draft.
+ *
  * @module dsh-shortcut/client/editor
  */
 
@@ -15,10 +19,19 @@ import { useSyncExternalStore } from 'react'
 import { ShortcutFailure } from './api.ts'
 import { entriesStore } from './entries.ts'
 import { validateDraft } from '../share.ts'
-import type { ShortcutDraft, ShortcutEntry, ShortcutErrorCode } from '../types.ts'
+import type { ShortcutDraft, ShortcutEntry, ShortcutErrorCode, ShortcutTarget, ShortcutTargetKind } from '../types.ts'
 
 /** Which dialog is showing. */
 export type EditorMode = 'create' | 'edit'
+
+/** The target selection inside the dialog (no display labels; those are resolved on submit). */
+export interface EditorTarget {
+  kind: ShortcutTargetKind
+  childSessionId?: string | undefined
+  leafLabel?: string | undefined
+  /** Session-id chain from the top-level session down to the direct parent. */
+  ancestors?: string[] | undefined
+}
 
 /** One dialog state. */
 export interface EditorState {
@@ -27,13 +40,21 @@ export interface EditorState {
   /** Edited record id (edit mode only). */
   id?: string | undefined
   name: string
+  /** Owning top-level session of the selected target (empty until picked). */
   sessionId: string
-  /** The target session came from the bubble and cannot be changed here. */
+  /** Selected agent inside `sessionId`. */
+  target: EditorTarget
+  /** The target came from the bubble and cannot be changed here. */
   sessionFixed: boolean
   text: string
   submitting: boolean
   /** Last refusal, as a code the dialog localizes. */
   problem?: ShortcutErrorCode | undefined
+}
+
+/** The main-agent target of one session. */
+export function mainTarget(): EditorTarget {
+  return { kind: 'main' }
 }
 
 /** The closed dialog. */
@@ -42,6 +63,7 @@ const CLOSED: EditorState = {
   mode: 'create',
   name: '',
   sessionId: '',
+  target: { kind: 'main' },
   sessionFixed: false,
   text: '',
   submitting: false,
@@ -88,11 +110,9 @@ export class EditorStore {
       ...CLOSED,
       open: true,
       mode: 'create',
-      name: '',
       sessionId: input.sessionId ?? '',
       sessionFixed: input.sessionId !== undefined,
       text: input.text,
-      submitting: false,
     })
   }
 
@@ -113,9 +133,13 @@ export class EditorStore {
       id: entry.id,
       name: entry.name,
       sessionId: entry.sessionId,
-      sessionFixed: false,
+      target: {
+        kind: entry.target.kind,
+        ...(entry.target.childSessionId === undefined ? {} : { childSessionId: entry.target.childSessionId }),
+        ...(entry.target.leafLabel === undefined ? {} : { leafLabel: entry.target.leafLabel }),
+        ...(entry.target.ancestors === undefined ? {} : { ancestors: [...entry.target.ancestors] }),
+      },
       text: entry.text,
-      submitting: false,
     })
   }
 
@@ -129,18 +153,43 @@ export class EditorStore {
    * Change one field.
    * @param patch - the fields to overwrite.
    */
-  patch(patch: Partial<Pick<EditorState, 'name' | 'text' | 'sessionId'>>): void {
+  patch(patch: Partial<Pick<EditorState, 'name' | 'text' | 'sessionId' | 'target'>>): void {
     this.publish({ ...this.state, ...patch, problem: undefined })
   }
 
   /**
+   * Select one agent leaf from the tree.
+   * @param sessionId - owning top-level session.
+   * @param target - the selected agent.
+   */
+  selectTarget(sessionId: string, target: EditorTarget): void {
+    this.publish({ ...this.state, sessionId, target, problem: undefined })
+  }
+
+  /**
    * Submit the dialog to the host.
+   * @param resolvePath - display-path resolver supplied by the dialog (it owns the translator).
    * @returns the stored record, or undefined when the attempt failed.
    */
-  async submit(): Promise<ShortcutEntry | undefined> {
+  async submit(resolvePath?: (target: ShortcutTarget, sessionId: string) => string): Promise<ShortcutEntry | undefined> {
     const state = this.state
     if (!state.open || state.submitting) return undefined
-    const draft: ShortcutDraft = { name: state.name, sessionId: state.sessionId, text: state.text }
+    const rawTarget: ShortcutTarget = {
+      kind: state.target.kind,
+      ...(state.target.childSessionId === undefined ? {} : { childSessionId: state.target.childSessionId }),
+      ...(state.target.leafLabel === undefined ? {} : { leafLabel: state.target.leafLabel }),
+      ...(state.target.ancestors === undefined ? {} : { ancestors: [...state.target.ancestors] }),
+    }
+    if (resolvePath !== undefined) {
+      const path = resolvePath(rawTarget, state.sessionId)
+      if (path.length > 0) rawTarget.path = path
+    }
+    const draft: ShortcutDraft = {
+      name: state.name,
+      sessionId: state.sessionId,
+      target: rawTarget,
+      text: state.text,
+    }
     const checked = validateDraft(entriesStore.getSnapshot().entries, draft, state.id)
     if (!checked.ok) {
       this.publish({ ...state, problem: checked.problem })

@@ -1,7 +1,7 @@
 {
   "name": "dsh-shortcut",
   "version": "0.1.0",
-  "description": "DeepSeek Harness plugin: saved shortcuts (name + target session + text), a sidebar menu that delivers a shortcut's text into its session, and per-message capture from user bubbles",
+  "description": "DeepSeek Harness plugin: saved shortcuts (name + target agent + text) with a workspace/session/agent tree picker, a sidebar menu that delivers a shortcut's text to its target without switching sessions, and per-message capture from user bubbles",
   "packageManager": "pnpm@11.22.0",
   "author": "Wu Zhiwei",
   "type": "module",

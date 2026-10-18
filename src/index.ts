@@ -2,22 +2,25 @@
  * dsh-shortcut, host half.
  *
  * Owns two things the browser half cannot: the durable record store
- * (`<DSH_HOME>/shortcut/entries.json`) and delivery — admitting one shortcut's
- * text as a normal user prompt into its target session through the host's own
- * Session Controller, which is the one path that already knows how to resume
- * a cold session, persist the message and hand it to the Agent.
+ * (`<DSH_HOME>/shortcut/entries.json`) and delivery.
+ *
+ * Delivery has exactly two paths, because DSH has exactly two addressable
+ * agent families:
+ *
+ * - the session's own agent goes through the host Session Controller
+ *   (`ctx.sessionController.prompt`), which resumes cold sessions and persists
+ *   the message;
+ * - a subagent or agent-team teammate is a continuable direct child of that
+ *   session, and goes through the host Subagent runtime
+ *   (`ctx.subagents.prompt`), the same service the app itself uses for
+ *   browser-authored subagent messages. A one-shot child cannot be addressed
+ *   (the runtime answers `subagent/not-resumable`), and a child needs its
+ *   parent session live (`subagent/parent-unavailable`), otherwise it cold-
+ *   resumes when its parent is resident.
  *
  * The browser talks to this half over the plugin's own connection channel
  * (`/shortcut`); every endpoint answers either a value or a structured
  * `{ code, message }` failure the client localizes.
- *
- * Mount this row in a profile's `cordis.patch.yml`:
- *
- * ```yaml
- * - insert:
- *     - id: shortcut
- *       name: 'dsh-shortcut'
- * ```
  *
  * @module dsh-shortcut
  */
@@ -26,7 +29,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { defaultShortcutDir, ShortcutStore, StoreFailure } from './store.ts'
 import { SHORTCUT_CHANNEL } from './types.ts'
-import type { ShortcutDraft, ShortcutEdit, ShortcutErrorCode } from './types.ts'
+import type { ShortcutDraft, ShortcutEdit, ShortcutErrorCode, ShortcutTarget } from './types.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'shortcut'
@@ -34,9 +37,11 @@ export const name = 'shortcut'
 /**
  * Capability seams: the wire channel (`connection` + `webServer`, the latter
  * because channel registrations belong to an owner fiber that can resolve the
- * served host) and the host Session business API.
+ * served host). The session and subagent business services are resolved lazily
+ * from the context so a profile without the subagent runtime still boots and
+ * keeps main-session shortcuts working.
  */
-export const inject = ['connection', 'webServer', 'sessionController']
+export const inject = ['connection', 'webServer']
 
 /** One RPC failure, in the wire vocabulary the client already speaks. */
 interface ChannelFailure {
@@ -84,7 +89,7 @@ interface ConnectionServiceSurface {
   ) => () => Promise<void>
 }
 
-/** One prompt submission, narrowed to the fields this plugin fills. */
+/** One prompt submission to a session's own agent, narrowed to the fields used here. */
 interface PromptRequestLike {
   readonly requestId: string
   readonly sessionId: string
@@ -95,6 +100,21 @@ interface PromptRequestLike {
 /** The one verb this plugin uses from the host session business API. */
 interface SessionControllerSurface {
   prompt(request: PromptRequestLike, signal: AbortSignal): Promise<{ accepted: true }>
+}
+
+/** One browser-authored message to a continuable direct child, as the subagent runtime takes it. */
+interface SubagentPromptRequestLike {
+  readonly requestId: string
+  readonly parentSessionId: string
+  readonly childSessionId: string
+  readonly mode: 'continuable'
+  readonly delivery: 'queue'
+  readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+}
+
+/** The one verb this plugin uses from the host subagent runtime. */
+interface SubagentRuntimeSurface {
+  prompt(request: SubagentPromptRequestLike, signal: AbortSignal): Promise<{ messageId: string }>
 }
 
 /** Build one failure result. */
@@ -120,6 +140,7 @@ function draftOf(payload: unknown): ShortcutDraft | undefined {
   return {
     name: draft.name as string,
     sessionId: draft.sessionId as string,
+    target: draft.target as ShortcutTarget,
     text: draft.text as string,
   }
 }
@@ -135,6 +156,7 @@ function editOf(payload: unknown): ShortcutEdit | undefined {
     draft: {
       name: draft.name as string,
       sessionId: draft.sessionId as string,
+      target: draft.target as ShortcutTarget,
       text: draft.text as string,
     },
   }
@@ -147,17 +169,32 @@ function idOf(payload: unknown): string | undefined {
 }
 
 /**
- * Classify a failed prompt so the browser can say something useful.
- * @param error - whatever the session API threw.
+ * Classify a failed delivery so the browser can say something useful.
+ *
+ * The session API's subagent-routing refusal is deliberately recognized here:
+ * a legacy record (or a session id that was really a subagent) reaches it as
+ * `session/agent-busy`, which would otherwise read as "the session is busy".
+ * @param error - whatever the session or subagent API threw.
  * @returns the closed failure code plus the host detail.
  */
 function sendFailure(error: unknown): { code: ShortcutErrorCode; message: string } {
-  const carrier = error as { name?: unknown; code?: unknown; message?: unknown } | null | undefined
+  const carrier = error as { name?: unknown; code?: unknown; message?: unknown; details?: unknown } | null | undefined
   const errorName = typeof carrier?.name === 'string' ? carrier.name : ''
   const code = typeof carrier?.code === 'string' ? carrier.code : ''
   const message = typeof carrier?.message === 'string' ? carrier.message : String(error)
+  const details = objectOf(carrier?.details)
+  const reason = typeof details?.reason === 'string' ? details.reason : ''
   if (errorName === 'ApiSessionNotFound' || code === 'session/not-found') return { code: 'session-not-found', message }
-  if (code === 'session/agent-busy' || code === 'session/writer-held') return { code: 'session-busy', message }
+  if (code.startsWith('subagent/')) {
+    if (code === 'subagent/not-resumable') return { code: 'target-not-resumable', message }
+    if (code === 'subagent/parent-unavailable') return { code: 'parent-unavailable', message }
+    return { code: 'target-unavailable', message }
+  }
+  if (code === 'session/agent-busy') {
+    const ownedBySubagent = /subagent/i.test(reason) || /subagent/i.test(message)
+    return ownedBySubagent ? { code: 'target-unavailable', message } : { code: 'session-busy', message }
+  }
+  if (code === 'session/writer-held') return { code: 'session-busy', message }
   if (/archiv/i.test(message) || /archiv/i.test(errorName) || code.includes('archiv')) {
     return { code: 'session-archived', message }
   }
@@ -166,38 +203,60 @@ function sendFailure(error: unknown): { code: ShortcutErrorCode; message: string
 
 /**
  * Mount the shortcut store and its RPC channel.
- * @param ctx - host context carrying the connection and session services.
+ * @param ctx - host context carrying the connection, session and subagent services.
  */
 export function apply(ctx: Context): void {
   const store = new ShortcutStore(defaultShortcutDir())
 
   /**
-   * Deliver one record's text into its target session.
-   * @param controller - the host session business API.
+   * Deliver one record's text to its addressed agent.
    * @param id - record identity.
    * @param signal - caller cancellation for the admission round-trip.
    * @returns the accepted marker, or a classified failure.
    */
-  const deliver = async (
-    controller: SessionControllerSurface,
-    id: string,
-    signal: AbortSignal,
-  ): Promise<HandlerResult> => {
+  const deliver = async (id: string, signal: AbortSignal): Promise<HandlerResult> => {
     const entry = await store.get(id)
     if (entry === undefined) return fail('not-found', `no shortcut with id ${id}`)
+    const text = entry.text
     try {
-      await controller.prompt({
-        requestId: randomUUID(),
-        sessionId: entry.sessionId,
-        mode: 'queue',
-        content: [{ type: 'text', text: entry.text }],
-      }, signal)
+      if (entry.target.kind === 'main') {
+        const controller = ctx.get('sessionController') as SessionControllerSurface | undefined
+        if (controller === undefined || typeof controller.prompt !== 'function') {
+          return fail('send-failed', 'the host session service is unavailable')
+        }
+        await controller.prompt({
+          requestId: randomUUID(),
+          sessionId: entry.sessionId,
+          mode: 'queue',
+          content: [{ type: 'text', text }],
+        }, signal)
+      } else {
+        const childSessionId = entry.target.childSessionId
+        if (childSessionId === undefined || childSessionId.length === 0) {
+          return fail('invalid-input', 'the target has no child session id')
+        }
+        const subagents = ctx.get('subagents') as SubagentRuntimeSurface | undefined
+        if (subagents === undefined || typeof subagents.prompt !== 'function') {
+          return fail('send-failed', 'the host subagent service is unavailable')
+        }
+        await subagents.prompt({
+          requestId: randomUUID(),
+          parentSessionId: entry.sessionId,
+          childSessionId,
+          mode: 'continuable',
+          delivery: 'queue',
+          content: [{ type: 'text', text }],
+        }, signal)
+      }
     } catch (error: unknown) {
       const failure = sendFailure(error)
-      ctx.logger.warn(`dsh-shortcut: delivering "${entry.name}" failed (${failure.code}): ${failure.message}`)
+      ctx.logger.warn(`dsh-shortcut: delivering "${entry.name}" (${entry.target.kind}) failed (${failure.code}): ${failure.message}`)
       return fail(failure.code, failure.message)
     }
-    return value({ accepted: true, entry: { id: entry.id, name: entry.name, sessionId: entry.sessionId } })
+    return value({
+      accepted: true,
+      entry: { id: entry.id, name: entry.name, sessionId: entry.sessionId, target: { ...entry.target } },
+    })
   }
 
   /** Dispatch one channel request. */
@@ -208,7 +267,7 @@ export function apply(ctx: Context): void {
           return value({ entries: await store.list() })
         case 'create': {
           const draft = draftOf(payload)
-          if (draft === undefined) return fail('invalid-input', 'create needs a { name, sessionId, text } draft')
+          if (draft === undefined) return fail('invalid-input', 'create needs a { name, sessionId, target, text } draft')
           return value({ entry: await store.create(draft) })
         }
         case 'update': {
@@ -225,11 +284,7 @@ export function apply(ctx: Context): void {
         case 'send': {
           const id = idOf(payload)
           if (id === undefined) return fail('invalid-input', 'send needs an id')
-          const controller = ctx.get('sessionController') as SessionControllerSurface | undefined
-          if (controller === undefined || typeof controller.prompt !== 'function') {
-            return fail('send-failed', 'the host session service is unavailable')
-          }
-          return await deliver(controller, id, signal)
+          return await deliver(id, signal)
         }
         default:
           return fail('invalid-input', `unknown endpoint ${JSON.stringify(endpoint)}`)

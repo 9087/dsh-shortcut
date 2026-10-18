@@ -11,7 +11,7 @@
  */
 
 import { SHORTCUT_CHANNEL } from '../types.ts'
-import type { ShortcutDraft, ShortcutEdit, ShortcutEntry } from '../types.ts'
+import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutTarget } from '../types.ts'
 import type { ShortcutErrorCode } from '../types.ts'
 
 /** One RPC result as the Connection transport frames it. */
@@ -45,16 +45,38 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>
 }
 
+/** Read one target shape off the wire (also used by the delivery receipt). */
+function targetOf(value: unknown): ShortcutTarget | undefined {
+  const target = recordOf(value)
+  const kind = target?.kind
+  if (target === undefined || (kind !== 'main' && kind !== 'subagent' && kind !== 'member')) return undefined
+  const rawAncestors = target.ancestors
+  const ancestors = Array.isArray(rawAncestors)
+    ? rawAncestors.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : []
+  return {
+    kind,
+    ...(typeof target.childSessionId === 'string' ? { childSessionId: target.childSessionId } : {}),
+    ...(ancestors.length === 0 ? {} : { ancestors }),
+    ...(typeof target.leafLabel === 'string' ? { leafLabel: target.leafLabel } : {}),
+    ...(typeof target.workspaceTitle === 'string' ? { workspaceTitle: target.workspaceTitle } : {}),
+    ...(typeof target.sessionTitle === 'string' ? { sessionTitle: target.sessionTitle } : {}),
+    ...(typeof target.path === 'string' ? { path: target.path } : {}),
+  }
+}
+
 /** Read one stored record off the wire, refusing a malformed one. */
 function entryOf(value: unknown): ShortcutEntry {
   const row = recordOf(value)
+  const target = targetOf(row?.target)
   if (row === undefined
     || typeof row.id !== 'string'
     || typeof row.name !== 'string'
     || typeof row.sessionId !== 'string'
     || typeof row.text !== 'string'
     || typeof row.createdAt !== 'number'
-    || typeof row.updatedAt !== 'number') {
+    || typeof row.updatedAt !== 'number'
+    || target === undefined) {
     throw new ShortcutFailure('store-unavailable', 'the host returned a malformed shortcut record')
   }
   return {
@@ -62,6 +84,7 @@ function entryOf(value: unknown): ShortcutEntry {
     name: row.name,
     sessionId: row.sessionId,
     text: row.text,
+    target,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -130,16 +153,17 @@ export class ShortcutApi {
   }
 
   /**
-   * Deliver one record's text into its target session.
+   * Deliver one record's text into its addressed agent.
    * @param id - record identity.
-   * @returns the name and session the host delivered to.
+   * @returns the record name plus the session and target the host delivered to.
    */
-  async send(id: string): Promise<{ name: string; sessionId: string }> {
+  async send(id: string): Promise<{ name: string; sessionId: string; target: ShortcutTarget }> {
     const value = recordOf(await this.call('send', { id }))
     const entry = recordOf(value?.entry)
-    if (entry === undefined || typeof entry.name !== 'string' || typeof entry.sessionId !== 'string') {
+    const target = targetOf(entry?.target)
+    if (entry === undefined || typeof entry.name !== 'string' || typeof entry.sessionId !== 'string' || target === undefined) {
       throw new ShortcutFailure('send-failed', 'the host did not confirm the delivery')
     }
-    return { name: entry.name, sessionId: entry.sessionId }
+    return { name: entry.name, sessionId: entry.sessionId, target }
   }
 }

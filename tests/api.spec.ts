@@ -23,9 +23,13 @@ const ENTRY = {
   name: '重启服务',
   sessionId: 'session-a',
   text: '重启',
+  target: { kind: 'main' as const },
   createdAt: 10,
   updatedAt: 20,
 }
+
+/** One minimal draft. */
+const DRAFT = { name: 'n', sessionId: 's', target: { kind: 'main' as const }, text: 't' }
 
 describe('ShortcutApi', () => {
   it('calls the plugin channel with the endpoint and reads the list', async () => {
@@ -35,16 +39,29 @@ describe('ShortcutApi', () => {
     expect(calls).toEqual([{ channel: SHORTCUT_CHANNEL, endpoint: 'list', payload: {} }])
   })
 
+  it('reads target labels from stored records', async () => {
+    const stored = {
+      ...ENTRY,
+      target: { kind: 'member', childSessionId: 'child-1', leafLabel: 'writer', path: 'proj / main / writer' },
+    }
+    const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [stored] } }))
+    await expect(new ShortcutApi(rpc).list()).resolves.toEqual([stored])
+  })
+
   it('sends create/update/remove/send payloads', async () => {
     const { rpc, calls } = fakeRpc(endpoint => ({ ok: true, value: endpoint === 'list' || endpoint === 'remove' ? undefined : { entry: ENTRY } }))
     const api = new ShortcutApi(rpc)
-    await expect(api.create({ name: 'n', sessionId: 's', text: 't' })).resolves.toEqual(ENTRY)
-    await expect(api.update({ id: 'id-1', draft: { name: 'n', sessionId: 's', text: 't' } })).resolves.toEqual(ENTRY)
+    await expect(api.create(DRAFT)).resolves.toEqual(ENTRY)
+    await expect(api.update({ id: 'id-1', draft: DRAFT })).resolves.toEqual(ENTRY)
     await expect(api.remove('id-1')).resolves.toBeUndefined()
-    await expect(api.send('id-1')).resolves.toEqual({ name: ENTRY.name, sessionId: ENTRY.sessionId })
+    await expect(api.send('id-1')).resolves.toEqual({
+      name: ENTRY.name,
+      sessionId: ENTRY.sessionId,
+      target: { kind: 'main' },
+    })
     expect(calls.map(call => call.endpoint)).toEqual(['create', 'update', 'remove', 'send'])
-    expect(calls[0]?.payload).toEqual({ draft: { name: 'n', sessionId: 's', text: 't' } })
-    expect(calls[1]?.payload).toEqual({ edit: { id: 'id-1', draft: { name: 'n', sessionId: 's', text: 't' } } })
+    expect(calls[0]?.payload).toEqual({ draft: DRAFT })
+    expect(calls[1]?.payload).toEqual({ edit: { id: 'id-1', draft: DRAFT } })
     expect(calls[2]?.payload).toEqual({ id: 'id-1' })
     expect(calls[3]?.payload).toEqual({ id: 'id-1' })
   })
@@ -52,7 +69,7 @@ describe('ShortcutApi', () => {
   it('keeps the host\'s business failure code', async () => {
     const { rpc } = fakeRpc(() => ({ ok: false, error: { code: 'name-taken', message: 'taken', details: {} } }))
     const api = new ShortcutApi(rpc)
-    const failure = await api.create({ name: 'n', sessionId: 's', text: 't' }).catch((error: unknown) => error)
+    const failure = await api.create(DRAFT).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(ShortcutFailure)
     expect(failure).toMatchObject({ code: 'name-taken' })
   })
@@ -66,6 +83,11 @@ describe('ShortcutApi', () => {
 
   it('refuses malformed records from the host', async () => {
     const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [{ id: 'x' }] } }))
+    await expect(new ShortcutApi(rpc).list()).rejects.toMatchObject({ code: 'store-unavailable' })
+  })
+
+  it('refuses a record without a target', async () => {
+    const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [{ ...ENTRY, target: undefined }] } }))
     await expect(new ShortcutApi(rpc).list()).rejects.toMatchObject({ code: 'store-unavailable' })
   })
 
