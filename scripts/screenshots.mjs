@@ -1,46 +1,68 @@
 /**
  * Documentation screenshots for both READMEs.
  *
- * Boots one throwaway `dsh web` per language, drives the real GUI through the
- * whole story (capture from a bubble, menu, delivery, Settings, target picker),
- * and writes the six images under `docs/images/`:
+ * Boots one throwaway `dsh web` per language with a realistic-looking fixture
+ * (a named workspace, a few plausible sessions, a handful of saved shortcuts)
+ * and writes the two cropped images the READMEs use:
  *
- *   shortcut-*.png      Chinese UI, used by README.zh.md
- *   shortcut-*.en.png   English UI, used by README.md
+ *   shortcut-dialog*.png  the add-shortcut dialog with its target tree
+ *   shortcut-menu*.png    the sidebar shortcut row with its menu open
  *
- * Deliberately separate from the E2E suite: that suite asserts behaviour, and
- * its browser occasionally dies mid-run; this script is the reproducible way to
- * regenerate the images after a UI change. The two "new session" presses carry
- * a settle delay so the shell's generated sidebar titles keep the first
- * characters of the seeded message.
+ * Everything is cropped to the control under discussion — the README never
+ * shows the whole shell. Deliberately separate from the E2E suite: that suite
+ * asserts behaviour, this script only regenerates the documentation images.
  *
  * Usage:
  *   $env:DSH_BIN = '...\@deepseek-ai\dsh\lib\bin.js'
  *   node scripts/screenshots.mjs
  */
 import { chromium } from '@playwright/test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { bootstrapHome, makeFixture, resolveDsh, startHost, stopHost } from '../e2e/helpers/host.ts'
 import { dismissNotices, newGuiPage } from '../e2e/helpers/gui.ts'
 
 const step = message => { console.log(`[screenshots] ${message}`) }
 
-/** Per-language fixture data and screenshot suffix. */
+/** Realistic fixture content per language (localized UI, one named workspace). */
 const LOCALES = [
   {
     locale: 'zh',
     suffix: '',
-    capture: '重启服务：请重启 dev 服务',
-    other: '这是第二个会话的消息',
-    name: '重启服务',
+    workspace: 'web-console',
+    sessions: [
+      '修复登录页的重定向循环，并补一个回归测试',
+      '让计费回调的处理保持幂等',
+      '升级前端构建流水线到新的打包器',
+    ],
+    shortcuts: [
+      '修复登录重定向',
+      '计费回调幂等',
+      '升级构建流水线',
+    ],
+    dialog: {
+      name: '修复登录重定向',
+      text: '请检查 OAuth 回调里 state 的校验顺序，并补一个覆盖该路径的回归测试。',
+    },
   },
   {
     locale: 'en',
     suffix: '.en',
-    capture: 'Restart the dev service',
-    other: 'Deploy the release',
-    name: 'Restart service',
+    workspace: 'web-console',
+    sessions: [
+      'Fix the login redirect loop and add a regression test',
+      'Make the billing webhook idempotent',
+      'Upgrade the frontend build pipeline',
+    ],
+    shortcuts: [
+      'Fix login redirect',
+      'Idempotent billing webhook',
+      'Upgrade the build pipeline',
+    ],
+    dialog: {
+      name: 'Fix login redirect',
+      text: 'Please review the state validation order in the OAuth callback and add a regression test for that path.',
+    },
   },
 ]
 
@@ -60,7 +82,7 @@ async function newSessionWith(page, text) {
     return [...document.querySelectorAll('[contenteditable="true"], [data-composer-input]')]
       .some(element => element.getBoundingClientRect().width > 0)
   }, { timeout: 20_000 })
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(400)
   await page.evaluate(() => {
     const editor = [...document.querySelectorAll('[contenteditable="true"]')]
       .find(element => element.getBoundingClientRect().width > 0)
@@ -70,24 +92,74 @@ async function newSessionWith(page, text) {
     response => response.url().includes('/api/session/prompt') && response.request().method() === 'POST',
     { timeout: 30_000 },
   )
-  await page.keyboard.type(text, { delay: 15 })
+  await page.keyboard.type(text, { delay: 8 })
   await page.keyboard.press('Enter')
   await accepted
-  await page.waitForTimeout(600)
+  await page.waitForTimeout(500)
 }
 
 /**
- * Capture the five screenshots for one language.
+ * Seed a few saved shortcuts so the menu has realistic rows before the client
+ * mounts; the records never deliver, they only render.
+ * @param {string} home - the throwaway DSH_HOME.
+ * @param {readonly string[]} names - shortcut names to seed.
+ */
+function seedShortcuts(home, names) {
+  const dir = join(home, 'shortcut')
+  mkdirSync(dir, { recursive: true })
+  const now = Date.now()
+  const entries = names.map((name, index) => ({
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    name,
+    sessionId: 'seeded-session',
+    text: name,
+    navigate: true,
+    target: { kind: 'main' },
+    createdAt: now - index * 60_000,
+    updatedAt: now - index * 60_000,
+  }))
+  writeFileSync(join(dir, 'entries.json'), `${JSON.stringify({ version: 2, entries }, null, 2)}\n`)
+}
+
+/**
+ * Screenshot one element (plus its shadow), cropped — never the whole shell.
+ * @param {import('@playwright/test').Page} page
+ * @param {import('@playwright/test').Locator} locator
+ * @param {string} path
+ * @param {number} margin
+ */
+async function cropShot(page, locator, path, margin = 16) {
+  const box = await locator.boundingBox()
+  if (box === null) throw new Error(`cannot crop ${path}: element not laid out`)
+  await page.screenshot({
+    path,
+    clip: {
+      x: Math.max(0, box.x - margin),
+      y: Math.max(0, box.y - margin),
+      width: box.width + margin * 2,
+      height: box.height + margin * 2,
+    },
+  })
+}
+
+/**
+ * Capture the two README screenshots for one language.
  * @param {typeof LOCALES[number]} data
  */
 async function captureLocale(data) {
   const fixture = makeFixture(`shots-${data.locale}`, data.locale)
+  // Give the workspace a real name; the sidebar shows its directory basename.
+  const namedWorkspace = join(fixture.home, data.workspace)
+  renameSync(fixture.workspace, namedWorkspace)
+  fixture.workspace = namedWorkspace
+
   let host
   let browser
   try {
     step(`${data.locale}: fixture ${fixture.home}`)
     await bootstrapHome(dsh, fixture)
     writeFileSync(join(fixture.home, 'settings.yaml'), `locale:\n  preference: ${data.locale}\n`)
+    seedShortcuts(fixture.home, data.shortcuts)
     host = await startHost(dsh, fixture.home, fixture.workspace, fixture.logFile)
     browser = await chromium.launch()
     const page = await newGuiPage(browser)
@@ -97,102 +169,61 @@ async function captureLocale(data) {
     await page.waitForSelector('[data-dsh-shortcut-footer]', { timeout: 30_000 })
     step(`${data.locale}: shell ready`)
 
-    await newSessionWith(page, data.capture)
-    const flow = page.locator('[data-chat-flow-kind="user"]').first()
-    await flow.waitFor({ state: 'visible', timeout: 30_000 })
-    step(`${data.locale}: session A created`)
+    for (const session of data.sessions) await newSessionWith(page, session)
+    step(`${data.locale}: sessions created`)
 
-    // The bubble's action row, hovered so the controls are revealed.
-    await flow.hover()
-    const flowBox = await flow.boundingBox()
-    if (flowBox !== null) {
+    // The sidebar row and its open menu.
+    await page.locator('[data-dsh-shortcut-trigger]').click()
+    const menu = page.getByRole('menu')
+    await menu.waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForTimeout(300)
+    const triggerBox = await page.locator('[data-dsh-shortcut-trigger]').boundingBox()
+    const menuBox = await menu.boundingBox()
+    if (triggerBox !== null && menuBox !== null) {
       await page.screenshot({
-        path: join('docs', 'images', `shortcut-bubble${data.suffix}.png`),
-        clip: {
-          x: Math.max(0, flowBox.x - 16),
-          y: Math.max(0, flowBox.y - 8),
-          width: flowBox.width + 140,
-          height: flowBox.height + 8,
-        },
-      })
-    }
-
-    // The sidebar foot: our row directly above Settings.
-    const footerBox = await page.locator('[data-slot="sidebar.footer.action"]').boundingBox()
-    const settingsRowBox = await page.locator('[data-slot="sidebar.settings"] button').first().boundingBox()
-    if (footerBox !== null && settingsRowBox !== null) {
-      await page.screenshot({
-        path: join('docs', 'images', `shortcut-sidebar${data.suffix}.png`),
+        path: join('docs', 'images', `shortcut-menu${data.suffix}.png`),
         clip: {
           x: 0,
-          y: Math.max(0, footerBox.y - 10),
-          width: 300,
-          height: Math.min(900, settingsRowBox.y + settingsRowBox.height - footerBox.y + 20),
+          y: Math.max(0, menuBox.y - 12),
+          width: menuBox.x + menuBox.width + 12,
+          height: Math.max(triggerBox.y + triggerBox.height, menuBox.y + menuBox.height) - menuBox.y + 24,
         },
       })
     }
-    step(`${data.locale}: sidebar + bubble shots`)
-
-    // Capture dialog, seeded from that bubble.
-    await flow.locator('[data-dsh-shortcut-add]').click()
-    const name = page.locator('[data-dsh-shortcut-name]')
-    await name.waitFor({ state: 'visible', timeout: 15_000 })
-    await page.waitForTimeout(300)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-dialog${data.suffix}.png`) })
-    await name.fill(data.name)
-    await page.locator('[data-dsh-shortcut-confirm]').click()
-    await name.waitFor({ state: 'hidden', timeout: 15_000 })
-    step(`${data.locale}: capture dialog shot`)
-
-    await newSessionWith(page, data.other)
-    step(`${data.locale}: session B created`)
-
-    // The menu, opened above the sidebar-foot row.
-    await page.locator('[data-dsh-shortcut-trigger]').click()
-    await page.getByRole('menuitem', { name: data.name }).waitFor({ state: 'visible', timeout: 15_000 })
-    await page.waitForTimeout(400)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-menu${data.suffix}.png`) })
+    await page.keyboard.press('Escape')
     step(`${data.locale}: menu shot`)
 
-    // "About this menu" (the menu's last item) explains the plugin and management.
-    await page.getByRole('menuitem', { name: /关于此菜单|About this menu/ }).click()
-    const about = page.locator('[data-dsh-shortcut-about]')
-    await about.waitFor({ state: 'visible', timeout: 15_000 })
-    await page.waitForTimeout(400)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-about${data.suffix}.png`) })
-    await page.locator('[data-dsh-shortcut-about-close]').click()
-    await about.waitFor({ state: 'hidden', timeout: 10_000 })
-    step(`${data.locale}: about shot`)
-
-    // The Settings page.
+    // The add-shortcut dialog, opened from Settings, with the target tree.
     await page.locator('[data-slot="sidebar.settings"] button').first().click()
     const tab = page.locator('button[class*="navCell"]').filter({ hasText: /Shortcuts|快捷方式/ }).first()
     await tab.waitFor({ state: 'visible', timeout: 20_000 })
     await tab.click()
-    await page.locator('[data-dsh-shortcut-row]').first().waitFor({ state: 'visible', timeout: 20_000 })
-    await page.waitForTimeout(500)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-settings${data.suffix}.png`) })
-    step(`${data.locale}: settings shot`)
-
-    // Narrow layout: the add action becomes a full-width row under the intro.
-    await page.setViewportSize({ width: 620, height: 820 })
-    await page.waitForTimeout(300)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-settings-narrow${data.suffix}.png`) })
-    await page.setViewportSize({ width: 1400, height: 900 })
-    step(`${data.locale}: narrow settings shot`)
-
-    // The target tree is inline in the dialog (no dropdown to open).
     await page.locator('[data-dsh-shortcut-settings-add]').click()
     await page.locator('[data-dsh-shortcut-name]').waitFor({ state: 'visible', timeout: 15_000 })
     const picker = page.locator('[data-dsh-shortcut-picker]')
-    await picker.waitFor({ state: 'visible', timeout: 15_000 })
-    // The tree opens with workspaces collapsed; press the first one to expand it.
     await picker.locator('[data-dsh-shortcut-tree-workspace]').first().click()
-    const pickerSession = picker.locator('[data-dsh-shortcut-tree-session]').first()
-    await pickerSession.waitFor({ state: 'visible', timeout: 15_000 })
-    await page.waitForTimeout(500)
-    await page.screenshot({ path: join('docs', 'images', `shortcut-picker${data.suffix}.png`) })
-    step(`${data.locale}: picker shot`)
+    const firstSession = picker.locator('[data-dsh-shortcut-tree-session]').first()
+    await firstSession.waitFor({ state: 'visible', timeout: 15_000 })
+    await firstSession.click()
+    await page.locator('[data-dsh-shortcut-name]').fill(data.dialog.name)
+    await page.locator('[data-dsh-shortcut-text]').fill(data.dialog.text)
+    await page.waitForTimeout(300)
+    // Crop the shortcut modal itself (the Settings page is also a role="dialog",
+    // so pick the one that owns our name field) with 20px of breathing room.
+    const shortcutDialog = page.locator('[role="dialog"]').filter({ has: page.locator('[data-dsh-shortcut-name]') }).first()
+    const dialogBox = await shortcutDialog.boundingBox()
+    if (dialogBox === null) throw new Error('cannot crop the shortcut dialog: not laid out')
+    const margin = 20
+    await page.screenshot({
+      path: join('docs', 'images', `shortcut-dialog${data.suffix}.png`),
+      clip: {
+        x: Math.max(0, dialogBox.x - margin),
+        y: Math.max(0, dialogBox.y - margin),
+        width: dialogBox.width + margin * 2,
+        height: dialogBox.height + margin * 2,
+      },
+    })
+    step(`${data.locale}: dialog shot`)
   } finally {
     if (browser !== undefined) await browser.close().catch(() => {})
     if (host !== undefined) await stopHost(host.proc)

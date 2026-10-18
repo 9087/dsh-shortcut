@@ -70,20 +70,21 @@ pnpm run e2e
 a browser that dies mid-run must cost a test, never a doc artefact. They come from the separate
 screenshot script below.
 
-What it asserts: plugin activation (its own DOM, plus no `startup failed:` in the host log); the sidebar trigger sits above Settings; the bubble button is immediately left of copy; the capture dialog is seeded from the bubble and stores the record (target `kind: 'main'`); the menu delivers into the original session while the page stays on another session (the target's transcript gains a message, the current one does not); Settings edit, then add-by-hand through the **tree picker** (expand workspace → session, pick the main-agent leaf, row shows the full path), then delete; records survive a host restart.
+What it asserts: plugin activation (its own DOM, plus no `startup failed:` in the host log); the sidebar trigger sits above Settings; the bubble button is immediately left of copy; the capture dialog is seeded from the bubble, defaults its jump switch on and stores the record (target `kind: 'main'`); the menu delivers into the original session and (with the switch on) navigates there, while a record with the switch off delivers without navigating; Settings edit (including turning the switch off), then add-by-hand through the **tree picker** (expand workspace → session, pick the main-agent leaf, row shows the full path), then delete; records survive a host restart.
 
 The fixture has no model credentials, so a session's first turn fails fast. `settleTurn()` in `beforeAll` waits for that turn to settle before any test sends a shortcut: a message admitted while the only turn is still running goes into the agent queue and does not reach the durable log at the same moment, which made the delivery assertion depend on timing (the flake was only visible on slower runs). Sidebar-title probes are deliberately short (the shell truncates long generated titles), so an English run cannot miss a row whose title is cut before the probe's last word.
 
 ## Screenshots
 
-`node scripts/screenshots.mjs` boots one throwaway `dsh web` per UI language, drives the whole
-story, and writes the six images for both READMEs (`sidebar`, `bubble`, `dialog`, `picker`, `menu`,
-`about`, `settings` per language):
+`node scripts/screenshots.mjs` boots one throwaway `dsh web` per UI language with a realistic
+fixture (one named workspace, three plausible sessions, a few seeded shortcuts), then writes two
+**cropped** images per language — the add-shortcut dialog and the opened sidebar menu. The READMEs
+never show the whole shell.
 
 | Files | UI | Used by |
 |---|---|---|
-| `docs/images/shortcut-*.png` | Chinese | [README.zh.md](README.zh.md) |
-| `docs/images/shortcut-*.en.png` | English | [README.md](README.md) |
+| `docs/images/shortcut-{dialog,menu}.png` | Chinese | [README.zh.md](README.zh.md) |
+| `docs/images/shortcut-{dialog,menu}.en.png` | English | [README.md](README.md) |
 
 It needs the same `DSH_BIN` the E2E uses and a built `lib/` (the images show the real plugin).
 Re-run it after any UI or icon change; the script adds a settle delay after each "New session"

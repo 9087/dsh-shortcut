@@ -110,8 +110,11 @@ Open the URL, confirm the sidebar "快捷方式" entry is drawn and the page sho
 
 ## Version rules
 
-- `0.1.x` for fixes to this first surface set.
-- `0.2.0` when the DSH client API this plugin builds against changes shape (bubble anchors,
-  slot options, session API) — report the tested DSH version in the release notes.
+- `0.1.x` for fixes to the existing surface set.
+- `0.2.0` for a new observable feature (for example the jump switch in `0.2.0`) or when the DSH
+  client API this plugin builds against changes shape (bubble anchors, slot options, session API) —
+  report the tested DSH version in the release notes.
+- Pushing a `v<package.json version>` tag now also publishes (Trusted Publishing), so tag only a
+  commit whose version is final.
 - Bump `peerDependencies` only if a real `@deepseek-ai/dsh-*` peer is added; the install guard
   accepts only ranges satisfying the running DSH version.
