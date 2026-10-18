@@ -333,10 +333,13 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     // The target tree is inline in the dialog — there is no dropdown to open.
     const picker = page.locator('[data-dsh-shortcut-picker]')
     await expect(picker).toBeVisible({ timeout: 10_000 })
-    // The tree list is a stretched panel, not a box that hugs its few rows.
+    // The tree list is a stretched 200px panel: it does not hug its few rows and
+    // the message body cannot stretch it beyond that cap.
     const treeList = picker.getByRole('tree')
     await expect(treeList).toBeVisible()
-    expect((await treeList.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(190)
+    const treeHeight = (await treeList.boundingBox())?.height ?? 0
+    expect(treeHeight).toBeGreaterThanOrEqual(190)
+    expect(treeHeight).toBeLessThanOrEqual(210)
     // Group rows wear the native folder icon; target rows do not. The tree opens
     // with workspaces collapsed, so the first press expands it.
     const workspaceRow = picker.locator('[data-dsh-shortcut-tree-workspace]').first()

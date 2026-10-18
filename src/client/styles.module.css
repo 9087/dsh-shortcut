@@ -763,11 +763,12 @@
   border-bottom: none;
 }
 
-/* The list always fills the column under the search box: it keeps a 200px
-   floor even when the tree is short, and grows with the message body. */
+/* The list fills its own 200px panel: short trees keep the full panel height,
+   and a tall message body can never stretch it further. */
 .treeInline > .treeList {
-  flex: 1 1 auto;
+  flex: 1 1 200px;
   min-height: 200px;
+  max-height: 200px;
   overflow-y: auto;
   padding: 4px;
   border: 0.5px solid var(--dsw-alias-border-l2);
