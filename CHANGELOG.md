@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0](https://github.com/9087/dsh-shortcut/compare/v0.2.1...v0.3.0) (2026-10-19)
+
+### Features
+
+* group the shortcut menu by session, and add any-session shortcuts. ([af01006](https://github.com/9087/dsh-shortcut/commit/af01006f2caa2a68e716eac3d37d9c86003595fb))
+
 ## [0.2.1](https://github.com/9087/dsh-shortcut/compare/v0.2.0...v0.2.1) (2026-10-19)
 
 ### Bug Fixes
