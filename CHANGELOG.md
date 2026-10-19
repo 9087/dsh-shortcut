@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1](https://github.com/9087/dsh-shortcut/compare/v0.2.0...v0.2.1) (2026-10-19)
+
+### Bug Fixes
+
+* correct the sidebar-foot menu layer and its position requirement. ([d178c92](https://github.com/9087/dsh-shortcut/commit/d178c92f6d6b698e1bbeb9fcc64b6022b5b31300))
+
 ## 0.2.0 — 2026-10-19
 
 Tested against `@deepseek-ai/dsh` 0.2.0-rc.2.
