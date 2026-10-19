@@ -38,6 +38,17 @@ export interface SessionTreePickerProps {
   selection?: TreeSelection | undefined
   /** Called when one target row is picked. */
   onSelect: (selection: TreeSelection) => void
+  /**
+   * Show the tree as CONTEXT rather than a control: the selected row is still revealed, but
+   * nothing can be picked, expanded or searched. Used while a shortcut sends to any session,
+   * where the stored target does not decide the delivery.
+   */
+  disabled?: boolean
+  /**
+   * Replace the read-only path line's text. A locked tree whose stored target no longer
+   * decides anything should not keep naming that target.
+   */
+  pathOverride?: string | undefined
 }
 
 /** One detail token rendered as a small tag. */
@@ -106,7 +117,9 @@ function pathOf(
 }
 
 /** The inline picker component. */
-export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerProps): ReactNode {
+export function SessionTreePicker({
+  t, selection, onSelect, disabled = false, pathOverride,
+}: SessionTreePickerProps): ReactNode {
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const tree = usePickerTree(t('picker.ungrouped'))
@@ -223,6 +236,9 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
       : `agent:${selection.sessionId}:${selection.target.childSessionId ?? selection.sessionId}`
 
   const toggle = (key: string): void => {
+    // A locked tree still reveals its selected chain (that happens in an effect), but a
+    // press must not change what is on screen: this tree is context, not a control.
+    if (disabled) return
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(key)) next.delete(key)
@@ -238,6 +254,7 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
 
   /** Pick one session's main agent as the target. */
   const pickSession = (session: PickerSessionNode): void => {
+    if (disabled) return
     // Mark the picked key as already revealed so the reopen-reveal effect does
     // not run again (and never scrolls) for a row the reader just pressed.
     revealedRef.current = `session:${session.id}`
@@ -249,7 +266,7 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
   }
 
   const pickAgent = (agent: AgentNode): void => {
-    if (!agent.selectable) return
+    if (disabled || !agent.selectable) return
     // Same as the session row: a user pick never triggers the reopen scroll.
     revealedRef.current = `agent:${agent.sessionId}:${agent.id}`
     onSelect({
@@ -376,17 +393,25 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
     )
   }
 
+  const shownPath = pathOverride ?? path
   return (
-    <div className={css.treeInline} data-dsh-shortcut-picker="">
-      {/* Read-only: the full path of the current target. Pressing it does nothing. */}
+    <div
+      className={disabled ? `${css.treeInline} ${css.treeLocked}` : css.treeInline}
+      data-dsh-shortcut-picker=""
+      {...(disabled ? { 'data-dsh-shortcut-picker-locked': '', 'aria-disabled': true } : {})}
+    >
+      {/* Read-only: the full path of the current target — or, for a locked tree, what
+          decides the delivery instead. Pressing it does nothing. */}
       <div
-        className={selection === undefined ? `${css.treePath} ${css.treePathEmpty}` : css.treePath}
+        className={selection === undefined && pathOverride === undefined
+          ? `${css.treePath} ${css.treePathEmpty}`
+          : css.treePath}
         data-dsh-shortcut-target=""
-        title={path}
+        title={shownPath}
         aria-label={t('picker.selectedAria')}
         aria-readonly="true"
       >
-        {path}
+        {shownPath}
       </div>
       <div className={css.treeSearchRow}>
         <input
@@ -394,9 +419,11 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
           value={query}
           placeholder={t('picker.search')}
           data-dsh-shortcut-tree-search=""
+          disabled={disabled}
           onChange={(event) => { setQuery(event.currentTarget.value) }}
         />
-      </div>      <div className={css.treeList} id={listId} role="tree" aria-label={t('picker.treeLabel')} ref={listRef}>
+      </div>
+      <div className={css.treeList} id={listId} role="tree" aria-label={t('picker.treeLabel')} ref={listRef}>
         {!ready && <p className={css.treeNotice}>{t('picker.loading')}</p>}
         {ready && rows.length === 0 && <p className={css.treeNotice}>{t('picker.noMatch')}</p>}
         {rows.map(renderRow)}

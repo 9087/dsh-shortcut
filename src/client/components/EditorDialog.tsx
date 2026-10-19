@@ -89,14 +89,17 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
     )
   }
 
-  // One target tree for every flow. A bubble capture only SEEDS the session (and the text);
-  // the tree stays editable, so a capture can be retargeted or made session-agnostic before
-  // it is saved.
+  // One target tree for every flow. A bubble capture only SEEDS the session (and the text),
+  // so the tree stays editable — unless the shortcut sends to ANY session, in which case the
+  // stored target does not decide the delivery and the tree becomes locked context whose
+  // path line says so.
   const targetField = (
     <SessionTreePicker
       t={t}
       selection={state.sessionId === '' ? undefined : { sessionId: state.sessionId, target: state.target }}
       onSelect={(selection) => { editorStore.selectTarget(selection.sessionId, selection.target) }}
+      disabled={state.anySession}
+      pathOverride={state.anySession ? t('dialog.anySessionValue') : undefined}
     />
   )
 
@@ -171,7 +174,6 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
               label={t('dialog.anySessionLabel')}
             />
           </div>
-          <span className={css.switchHint}>{t('dialog.anySessionHint')}</span>
         </div>
 
         {/* Behaviour after delivery: open the target (default), or stay put. */}

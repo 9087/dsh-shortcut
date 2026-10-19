@@ -15,6 +15,7 @@
  * @module dsh-shortcut/client/navigation
  */
 
+import type { ShownConversation } from './api.ts'
 import type { ShortcutTarget } from '../types.ts'
 
 /** The context slice this module reads lazily when the reader navigates. */
@@ -27,9 +28,14 @@ interface UiWorkspaceLike {
   openSession(target: unknown): void
 }
 
+/** One addressable child's position, as the client catalog reports it. */
+interface SubagentAddressLike {
+  parentSessionId?: unknown
+}
+
 /** The Session Controller's address resolver for child sessions. */
 interface SessionsLike {
-  subagentAddress?(id: string): unknown
+  subagentAddress?(id: string): SubagentAddressLike | undefined
 }
 
 /** How the reader reaches the client context. */
@@ -41,6 +47,37 @@ let readContext: (() => ContextLike | undefined) | undefined
  */
 export function bindNavigation(reader: () => ContextLike | undefined): void {
   readContext = reader
+}
+
+/**
+ * Resolve the conversation the page has open into the address a delivery needs.
+ *
+ * The shell can open a subagent or a team member as its own conversation, and that child
+ * is NOT reachable through the session controller — only through the subagent runtime,
+ * which needs its parent. So this asks the session service whether the shown id is an
+ * addressable child and, when it is, carries the parent along; everything else is treated
+ * as a top-level session.
+ *
+ * Best effort by design: a shell without the resolver, or one that answers nothing, leaves
+ * the id as a top-level session and the host reports what went wrong.
+ * @param shownId - the session id the page is showing, from the session seat.
+ * @returns the address, or undefined when nothing is open.
+ */
+export function shownSessionOf(shownId: string | undefined): ShownConversation | undefined {
+  if (shownId === undefined || shownId.length === 0) return undefined
+  const ctx = readContext?.()
+  if (ctx === undefined) return { sessionId: shownId }
+  try {
+    const sessions = ctx.get('sessions') as SessionsLike | undefined
+    const address = sessions?.subagentAddress?.(shownId)
+    const parent = address?.parentSessionId
+    if (typeof parent === 'string' && parent.length > 0 && parent !== shownId) {
+      return { sessionId: shownId, parentSessionId: parent }
+    }
+  } catch {
+    // An unreadable catalog is not a delivery failure: treat it as a top-level session.
+  }
+  return { sessionId: shownId }
 }
 
 /** The receipt a successful delivery carries (name/session/target). */

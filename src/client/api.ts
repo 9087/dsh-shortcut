@@ -104,6 +104,18 @@ export interface ShortcutDelivery {
   anySession: boolean
 }
 
+/**
+ * The conversation the page has open, as an `anySession` record needs it.
+ *
+ * `parentSessionId` is present only when that conversation is an addressable child (a
+ * subagent or team member opened on its own): a child is reachable through the subagent
+ * runtime, never through the session controller, so the host needs the parent.
+ */
+export interface ShownConversation {
+  sessionId: string
+  parentSessionId?: string | undefined
+}
+
 /** The business verbs the browser half calls. */
 export class ShortcutApi {
   private readonly rpc: ClientRpc
@@ -169,12 +181,18 @@ export class ShortcutApi {
   /**
    * Deliver one record's text into its addressed agent.
    * @param id - record identity.
-   * @param currentSessionId - the session the page is showing. Required by an any-session
-   *   record (it delivers there), ignored by every other record.
+   * @param shown - the conversation the page has open. Required by an any-session record
+   *   (it delivers there), ignored by every other record.
    * @returns the record name plus the session and target the host actually delivered to.
    */
-  async send(id: string, currentSessionId?: string | undefined): Promise<ShortcutDelivery> {
-    const payload = currentSessionId === undefined ? { id } : { id, currentSessionId }
+  async send(id: string, shown?: ShownConversation | undefined): Promise<ShortcutDelivery> {
+    const payload = shown === undefined
+      ? { id }
+      : {
+          id,
+          currentSessionId: shown.sessionId,
+          ...(shown.parentSessionId === undefined ? {} : { currentParentSessionId: shown.parentSessionId }),
+        }
     const value = recordOf(await this.call('send', payload))
     const entry = recordOf(value?.entry)
     const target = targetOf(entry?.target)

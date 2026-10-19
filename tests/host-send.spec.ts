@@ -36,6 +36,16 @@ interface HandlerResult {
 /** The channel handler the plugin registers. */
 type Handler = (endpoint: string, payload: unknown, signal: AbortSignal, peer: unknown) => Promise<HandlerResult>
 
+/** One prompt as the host subagent runtime received it. */
+interface ChildPromptRequest {
+  requestId: string
+  parentSessionId: string
+  childSessionId: string
+  mode: string
+  delivery: string
+  content: readonly { type: string; text: string }[]
+}
+
 /** One record as the channel returns it. */
 interface EntryValue {
   id: string
@@ -70,6 +80,7 @@ afterEach(() => {
  */
 function mount(): { call: (endpoint: string, payload: unknown) => Promise<HandlerResult>; prompts: PromptRequest[] } {
   const prompts: PromptRequest[] = []
+  const childPrompts: ChildPromptRequest[] = []
   let handler: Handler | undefined
   const ctx = {
     /** The plugin owns its channel through an effect; running it mounts the handler. */
@@ -93,6 +104,14 @@ function mount(): { call: (endpoint: string, payload: unknown) => Promise<Handle
           },
         }
       }
+      if (name === 'subagents') {
+        return {
+          prompt: async (request: ChildPromptRequest) => {
+            childPrompts.push(request)
+            return { messageId: 'message-1' }
+          },
+        }
+      }
       return undefined
     },
     logger: { info() {}, warn() {}, error() {} },
@@ -101,6 +120,7 @@ function mount(): { call: (endpoint: string, payload: unknown) => Promise<Handle
   if (handler === undefined) throw new Error('the plugin registered no channel handler')
   return {
     prompts,
+    childPrompts,
     call: (endpoint, payload) => handler!(endpoint, payload, new AbortController().signal, {}),
   }
 }
@@ -146,6 +166,49 @@ describe('host delivery routing', () => {
     // Delivered to that session's own agent, not to whatever agent the record was saved at.
     expect((result.value as { entry: { sessionId: string; target: { kind: string } } }).entry)
       .toMatchObject({ sessionId: 'session-shown', target: { kind: 'main' } })
+  })
+
+  it('delivers to the CHILD when the open conversation is a subagent, not to its main agent', async () => {
+    // The shell can open a subagent as its own conversation; that child is not reachable
+    // through the session controller, so the delivery must take the subagent runtime.
+    const { call, prompts, childPrompts } = mount()
+    const entry = await create(call, { name: 'anywhere', anySession: true })
+    const result = await call('send', {
+      id: entry.id,
+      currentSessionId: 'session-child',
+      currentParentSessionId: 'session-parent',
+    })
+    expect(result.ok).toBe(true)
+    expect(prompts).toEqual([])
+    expect(childPrompts).toHaveLength(1)
+    expect(childPrompts[0]).toMatchObject({
+      parentSessionId: 'session-parent',
+      childSessionId: 'session-child',
+      mode: 'continuable',
+      delivery: 'queue',
+      content: [{ type: 'text', text: 'hello' }],
+    })
+    // The receipt describes the child the same way a stored child target would, so a client
+    // that navigates reopens the subagent rather than its parent's conversation.
+    expect((result.value as { entry: { sessionId: string; target: { kind: string; childSessionId?: string } } }).entry)
+      .toMatchObject({
+        sessionId: 'session-parent',
+        target: { kind: 'subagent', childSessionId: 'session-child' },
+      })
+  })
+
+  it('still sends a BOUND record to its stored session when the open conversation is a child', async () => {
+    // The parent field rides along on every send; a bound record must ignore it entirely.
+    const { call, prompts, childPrompts } = mount()
+    const entry = await create(call, { name: 'bound' })
+    const result = await call('send', {
+      id: entry.id,
+      currentSessionId: 'session-child',
+      currentParentSessionId: 'session-parent',
+    })
+    expect(result.ok).toBe(true)
+    expect(prompts.map(request => request.sessionId)).toEqual(['session-stored'])
+    expect(childPrompts).toEqual([])
   })
 
   it('refuses an any-session record when the caller showed no session', async () => {

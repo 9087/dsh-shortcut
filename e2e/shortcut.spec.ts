@@ -453,10 +453,14 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await openEditor()
     const anySwitch = page.locator('[data-dsh-shortcut-any-session]').getByRole('switch')
     await expect(anySwitch).toHaveAttribute('aria-checked', 'false')
-    // In EDIT the tree is a control, not context: this switch is not what unlocks it.
+    // With the switch OFF the tree is a control: the stored target is what gets delivered.
     await expect(page.locator('[data-dsh-shortcut-picker]')).not.toHaveAttribute('aria-disabled', 'true')
     await anySwitch.click()
     await expect(anySwitch).toHaveAttribute('aria-checked', 'true')
+    // With it ON the target no longer decides anything, so the list becomes context and the
+    // path line says what does decide it instead.
+    await expect(page.locator('[data-dsh-shortcut-picker]')).toHaveAttribute('aria-disabled', 'true')
+    await expect(page.locator('[data-dsh-shortcut-target]')).toHaveText(/任意会话|Any session/)
     await save(true)
 
     // Where the record came from no longer decides anything: it is triggered from B below.
@@ -486,6 +490,9 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(anySwitch).toHaveAttribute('aria-checked', 'true')
     await anySwitch.click()
     await expect(anySwitch).toHaveAttribute('aria-checked', 'false')
+    // Turning it off hands the tree back: the stored target decides again.
+    await expect(page.locator('[data-dsh-shortcut-picker]')).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(page.locator('[data-dsh-shortcut-target]')).not.toHaveText(/任意会话|Any session/)
     await save(false)
     await backToB()
     await trigger.click()

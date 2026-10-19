@@ -172,10 +172,31 @@ function idOf(payload: unknown): string | undefined {
   return typeof id === 'string' && id.length > 0 ? id : undefined
 }
 
-/** Read the caller's shown session out of a send request, when it named one. */
-function currentSessionOf(payload: unknown): string | undefined {
-  const value = objectOf(payload)?.currentSessionId
-  return typeof value === 'string' && value.length > 0 ? value : undefined
+/**
+ * The conversation the caller has open, as the host needs it to deliver an any-session
+ * record. `parentSessionId` is present only when that conversation is an addressable child
+ * (a subagent or team member opened as its own conversation), because a child is reachable
+ * through the subagent runtime and never through the session controller.
+ */
+interface ShownConversation {
+  sessionId: string
+  parentSessionId?: string
+}
+
+/**
+ * Read the caller's open conversation out of a send request.
+ * @param payload - the channel payload.
+ * @returns the shown conversation, or undefined when the caller named none.
+ */
+function shownConversationOf(payload: unknown): ShownConversation | undefined {
+  const body = objectOf(payload)
+  const sessionId = body?.currentSessionId
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
+  const parent = body?.currentParentSessionId
+  if (typeof parent === 'string' && parent.length > 0 && parent !== sessionId) {
+    return { sessionId, parentSessionId: parent }
+  }
+  return { sessionId }
 }
 
 /**
@@ -221,29 +242,37 @@ export function apply(ctx: Context): void {
   /**
    * Deliver one record's text to its addressed agent.
    *
-   * A record with `anySession` set is addressed by the CALLER, not by the store: it
-   * delivers to the session the caller is showing (that session's main agent), and a
-   * caller that named none is refused — the record deliberately does not fall back to
-   * the session it was captured from, because that is the behaviour the switch turns off.
+   * A record with `anySession` set is addressed by the CALLER, not by the store: it goes to
+   * the conversation the caller has open — that conversation itself, so a subagent or team
+   * member opened as its own conversation receives it too, not that session's main agent —
+   * and a caller that named none is refused. The record deliberately does not fall back to
+   * the session it was captured from, because that fallback is what the switch turns off.
    * @param id - record identity.
    * @param signal - caller cancellation for the admission round-trip.
-   * @param currentSessionId - the session the caller is showing, when it named one.
+   * @param current - the conversation the caller has open, when it named one.
    * @returns the accepted marker, or a classified failure.
    */
   const deliver = async (
     id: string,
     signal: AbortSignal,
-    currentSessionId: string | undefined,
+    current: ShownConversation | undefined,
   ): Promise<HandlerResult> => {
     const entry = await store.get(id)
     if (entry === undefined) return fail('not-found', `no shortcut with id ${id}`)
-    if (entry.anySession && currentSessionId === undefined) {
+    if (entry.anySession && current === undefined) {
       return fail('no-current-session', `"${entry.name}" is sendable to any session, but the caller showed none`)
     }
-    // Where this delivery really goes: the caller's session for an any-session record
-    // (always that session's own agent), the stored address otherwise.
-    const sessionId = entry.anySession ? currentSessionId as string : entry.sessionId
-    const target: ShortcutTarget = entry.anySession ? { kind: 'main' } : entry.target
+    /**
+     * Where this delivery really goes. For an any-session record the caller's conversation
+     * decides the shape too: a child (subagent/teammate) has to go through the subagent
+     * runtime with its parent, everything else through the session controller.
+     */
+    const address: { sessionId: string; target: ShortcutTarget } = entry.anySession && current !== undefined
+      ? current.parentSessionId === undefined
+        ? { sessionId: current.sessionId, target: { kind: 'main' } }
+        : { sessionId: current.parentSessionId, target: { kind: 'subagent', childSessionId: current.sessionId } }
+      : { sessionId: entry.sessionId, target: entry.target }
+    const { sessionId, target } = address
     const text = entry.text
     try {
       if (target.kind === 'main') {
@@ -320,7 +349,7 @@ export function apply(ctx: Context): void {
         case 'send': {
           const id = idOf(payload)
           if (id === undefined) return fail('invalid-input', 'send needs an id')
-          return await deliver(id, signal, currentSessionOf(payload))
+          return await deliver(id, signal, shownConversationOf(payload))
         }
         default:
           return fail('invalid-input', `unknown endpoint ${JSON.stringify(endpoint)}`)

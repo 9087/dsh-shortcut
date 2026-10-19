@@ -25,7 +25,7 @@ import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
 import { groupShortcuts, shortcutRows } from '../menu-groups.ts'
-import { openDeliveredTarget } from '../navigation.ts'
+import { openDeliveredTarget, shownSessionOf } from '../navigation.ts'
 import { useCurrentSessionId } from '../session-bridge.ts'
 import { targetShortLabel } from '../catalog.ts'
 import { ShortcutIcon } from './ShortcutIcon.tsx'
@@ -96,9 +96,10 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   const deliver = async (id: string): Promise<void> => {
     setOpen(false)
     try {
-      // The shown session is handed over on every delivery: an any-session record
-      // delivers there, and the host ignores it for every other record.
-      const receipt = await entriesStore.send(id, currentSessionId)
+      // The open conversation is handed over on every delivery: an any-session record goes
+      // there (as a child too, when a subagent is the conversation on screen), and the host
+      // ignores it for every other record.
+      const receipt = await entriesStore.send(id, shownSessionOf(currentSessionId))
       bannerStore.show(t('toast.sent', { target: targetShortLabel(receipt.target, receipt.sessionId, t) }), { tone: 'success' })
       if (receipt.navigate) openDeliveredTarget(receipt)
     } catch (error: unknown) {

@@ -743,6 +743,18 @@
 }
 /* Wide two-column editor: name + target tree left, message body right. */
 
+/* A picker shown as CONTEXT rather than a control (a shortcut that sends to any session:
+   the stored target no longer decides the delivery). Its selected row is still revealed;
+   the component guards every press, and this is the look that says so. */
+.treeLocked {
+  opacity: 0.6;
+}
+
+.treeLocked button,
+.treeLocked input {
+  cursor: default;
+}
+
 .editorDialog {
   width: min(860px, calc(100vw - 48px));
   max-width: min(860px, calc(100vw - 48px));

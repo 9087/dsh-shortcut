@@ -72,19 +72,45 @@ describe('ShortcutApi', () => {
     expect(calls[3]?.payload).toEqual({ id: 'id-1' })
   })
 
-  it('hands the shown session to the host on send, and only on send', async () => {
+  it('hands the open conversation to the host on send, and only on send', async () => {
     const { rpc, calls } = fakeRpc(() => ({ ok: true, value: { entry: { ...ENTRY, anySession: true } } }))
     const api = new ShortcutApi(rpc)
-    const receipt = await api.send('id-1', 'session-shown')
+    const receipt = await api.send('id-1', { sessionId: 'session-shown' })
+    // A top-level conversation carries no parent: the host delivers to its own agent.
     expect(calls[0]?.payload).toEqual({ id: 'id-1', currentSessionId: 'session-shown' })
-    // The receipt reports what the host actually did: an any-session delivery is always
-    // the shown session's own agent, and it says so.
     expect(receipt).toEqual({
       name: ENTRY.name,
       sessionId: ENTRY.sessionId,
       target: { kind: 'main' },
       navigate: true,
       anySession: true,
+    })
+  })
+
+  it('carries the parent along when the open conversation is a child', async () => {
+    const childReceipt = {
+      entry: {
+        ...ENTRY,
+        anySession: true,
+        sessionId: 'session-parent',
+        target: { kind: 'subagent', childSessionId: 'session-child' },
+      },
+    }
+    const { rpc, calls } = fakeRpc(() => ({ ok: true, value: childReceipt }))
+    const receipt = await new ShortcutApi(rpc).send('id-1', {
+      sessionId: 'session-child',
+      parentSessionId: 'session-parent',
+    })
+    // A subagent/team member opened as its own conversation is not reachable through the
+    // session controller, so the parent goes with it and the host uses the subagent runtime.
+    expect(calls[0]?.payload).toEqual({
+      id: 'id-1',
+      currentSessionId: 'session-child',
+      currentParentSessionId: 'session-parent',
+    })
+    expect(receipt).toMatchObject({
+      sessionId: 'session-parent',
+      target: { kind: 'subagent', childSessionId: 'session-child' },
     })
   })
 

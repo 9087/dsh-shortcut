@@ -195,10 +195,19 @@ export interface SendRequest {
   readonly kind: 'send'
   readonly id: string
   /**
-   * The session the caller is showing. Required for an `anySession` record, which
+   * The conversation the caller has open. Required for an `anySession` record, which
    * delivers here instead of to its stored session; ignored for every other record.
+   *
+   * This is the SHOWN conversation, which is not always a top-level session: the shell can
+   * open a subagent or team member as its own conversation, and then this id is that child.
    */
   readonly currentSessionId?: string
+  /**
+   * The parent of {@link currentSessionId} when the shown conversation is an addressable
+   * child. A child cannot be reached through the session controller, so the host needs the
+   * parent to deliver through the subagent runtime instead. Absent for a top-level session.
+   */
+  readonly currentParentSessionId?: string
 }
 
 /** Every request this channel accepts. */

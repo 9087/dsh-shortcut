@@ -16,8 +16,10 @@ together with its target — a session, or one agent inside it — and send it t
 - A **Shortcuts** row in the sidebar-foot list above Settings. Its menu groups every saved
   shortcut into **the session you are looking at**, **any-session** shortcuts, and **the
   others**; pressing one sends its text to that shortcut's target.
-- An add/edit switch, **Sendable to any session**, makes a shortcut deliver to whichever session
-  you are viewing when you trigger it, instead of the one it was captured from.
+- An add/edit switch, **Sendable to any session**, makes a shortcut deliver to whatever
+  conversation you have open when you trigger it — that conversation itself, so a subagent
+  opened on its own receives it too — instead of the one it was captured from. While the
+  switch is on, the target list is shown but locked, and its path line reads **Any session**.
 - After sending, the target session opens by default. A per-shortcut **Jump to the session** switch
   (in the add/edit dialog) can turn that off and keep the old background-only delivery.
 - The target is picked from an inline tree: workspace → session → the session's **main agent**, a
