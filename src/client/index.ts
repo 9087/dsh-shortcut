@@ -4,8 +4,9 @@
  * Registers three seats on the 0.2.0 shell and mounts the DOM bridge for the
  * message-bubble button:
  *
- * - `sidebar.footer.action` — the "快捷方式" row directly above Settings, and
- *   the menu that delivers a shortcut without switching sessions;
+ * - `sidebar.footer.action` — the "快捷方式" row in the sidebar-foot list above
+ *   the shell's Settings row, and the menu that delivers a shortcut without
+ *   switching sessions;
  * - `settings.section` — the "快捷方式" Settings page (list/add/edit/delete);
  * - `conversation.session.header.utilities` — an invisible session-scoped seat
  *   that publishes the shown session and its user-message texts;
@@ -142,8 +143,10 @@ export function apply(ctx: ClientContextLike): void {
     locale: NS,
   }, ShortcutSessionSeat)
 
-  // Order 90 keeps this row below other footer plugins and directly above the
-  // shell's Settings row, which is the position the product asks for.
+  // The shell draws this slot's rows above its own Settings row, which is the position
+  // the product asks for. Where INSIDE that list this row lands is not a requirement:
+  // other footer plugins insert rows of their own, so a neighbour between us and
+  // Settings is normal, and nothing here (or in the suite) may assume adjacency.
   seat(ctx, 'sidebar.footer.action', {
     id: 'shortcut-footer',
     order: 90,

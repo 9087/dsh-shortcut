@@ -1,6 +1,6 @@
 /**
- * The sidebar-foot entry: the button directly above the shell's Settings
- * button, and the menu it opens.
+ * The sidebar-foot entry: the button in the footer action list the shell draws
+ * above its own Settings button, and the menu it opens.
  *
  * Pressing a menu item delivers that shortcut's text into its target agent. By
  * default it also opens that target in the shell (the shortcut's "jump to that

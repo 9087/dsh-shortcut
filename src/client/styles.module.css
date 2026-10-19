@@ -838,6 +838,14 @@
 
 .menuCard {
   box-sizing: border-box;
+  /* The card is portaled to <body>, so this is a page-level layer, not a sidebar one:
+     it must sit ABOVE the shell's own chrome even though its trigger lives inside the
+     sidebar. `Menu`'s `.portal` class also sets 1100, which is exactly the level every
+     other portaled menu in the shell uses, and a tie there is decided by DOM order —
+     too fragile to rely on when two menus can be open. 1200 puts ours one step above
+     that shared level while staying below the document-preview overlays (10000+),
+     which are meant to cover everything. */
+  z-index: 1200;
   min-width: min(260px, calc(100vw - 24px));
   max-width: min(320px, calc(100vw - 24px));
   padding: 4px;

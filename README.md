@@ -13,7 +13,7 @@ together with its target — a session, or one agent inside it — and send it t
 
 ## Features
 
-- A **Shortcuts** row at the sidebar foot, directly above Settings. Its menu lists every saved
+- A **Shortcuts** row in the sidebar-foot list above Settings. Its menu lists every saved
   shortcut; pressing one sends its text to that shortcut's target.
 - After sending, the target session opens by default. A per-shortcut **Jump to the session** switch
   (in the add/edit dialog) can turn that off and keep the old background-only delivery.

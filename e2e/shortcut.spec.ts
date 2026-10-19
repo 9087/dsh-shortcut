@@ -5,7 +5,7 @@
  * The suite boots a private `dsh web` (never the user's 3080 process), links
  * this checkout into that home's web profile, and drives Chromium:
  *
- *   1. the plugin activates and its sidebar trigger sits directly above Settings;
+ *   1. the plugin activates and its sidebar trigger sits in the footer list above Settings;
  *   2. every durable user bubble carries "add to shortcut" immediately LEFT of
  *      the copy button, and the capture dialog seeds itself from that bubble;
  *   3. a captured shortcut delivers its text into the ORIGINAL session and
@@ -112,7 +112,7 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     fixture?.cleanup()
   })
 
-  test('1. the sidebar trigger sits above Settings, and the bubble button left of copy', async () => {
+  test('1. the sidebar trigger sits in the footer list above Settings, and the bubble button left of copy', async () => {
     const trigger = page.locator('[data-dsh-shortcut-trigger]')
     await expect(trigger).toBeVisible()
     // Geometry is read in ONE pass: the shell draws the sidebar foot after boot,
@@ -128,16 +128,23 @@ test.describe('dsh-shortcut (real Chromium)', () => {
       return {
         ours: ours === null ? null : rect(ours),
         settings: settings === undefined ? null : rect(settings),
+        // The slot IS the requirement: the shell draws this action list above its own
+        // Settings row, so a row in it is above Settings wherever it lands in the column.
+        inFooterSlot: ours !== null && ours.closest('div[data-slot="sidebar.footer.action"]') !== null,
+        footerRows: document.querySelectorAll('div[data-slot="sidebar.footer.action"] button').length,
       }
     })
     expect(geometry.ours).not.toBeNull()
     expect(geometry.settings).not.toBeNull()
-    // The row mirrors the Settings trigger's geometry: same left edge, same
-    // width, sitting directly above it with the same 4px / -2px row rhythm.
+    // Ours fills the footer column the same way the Settings trigger does (same left edge,
+    // same width), so the two read as one stack.
     expect(Math.abs(geometry.ours!.x - geometry.settings!.x)).toBeLessThanOrEqual(1)
     expect(Math.abs(geometry.ours!.width - geometry.settings!.width)).toBeLessThanOrEqual(1)
+    // Above Settings — and NOT required to be flush against it: the footer action slot is
+    // shared with every other footer plugin, any of which may insert rows between the two.
+    // An adjacency assertion here would go red the moment a second plugin is installed.
+    expect(geometry.inFooterSlot).toBe(true)
     expect(geometry.ours!.y).toBeLessThan(geometry.settings!.y)
-    expect(geometry.settings!.y - (geometry.ours!.y + geometry.ours!.height)).toBeLessThanOrEqual(12)
     // The trailing affordance is the three-dot menu glyph, not a record count.
     await expect(trigger.locator('[data-dsh-shortcut-affordance]')).toBeVisible()
     await expect(trigger.locator('[data-dsh-shortcut-affordance] svg')).toHaveCount(1)
@@ -223,6 +230,39 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     expect(menuBox).not.toBeNull()
     expect(menuBox!.x).toBeGreaterThanOrEqual(triggerBox!.x + triggerBox!.width + 2)
     expect(menuBox!.width).toBeGreaterThanOrEqual(240)
+    // Geometry alone does not prove the card is VISIBLE: a menu can be placed correctly
+    // and still be covered by the sidebar it lives in, or by a later sibling. What the
+    // reader needs is that the card is the element that actually paints at its own
+    // position, and that it did not inherit the sidebar's layer to get there.
+    const layering = await page.evaluate(() => {
+      const menu = document.querySelector('[role="menu"]')
+      if (menu === null) return null
+      const box = menu.getBoundingClientRect()
+      const mid = box.top + box.height / 2
+      const paintedOnTop = (x: number, y: number): boolean => {
+        const top = document.elementsFromPoint(x, y)[0]
+        return top !== undefined && menu.contains(top)
+      }
+      const style = getComputedStyle(menu)
+      return {
+        parentIsBody: menu.parentElement === document.body,
+        position: style.position,
+        zIndex: Number.parseInt(style.zIndex, 10),
+        probes: [
+          paintedOnTop(box.left + 2, mid),
+          paintedOnTop(box.left + box.width / 2, mid),
+          paintedOnTop(box.right - 2, mid),
+        ],
+      }
+    })
+    expect(layering).not.toBeNull()
+    // Portaled to the page, so the sidebar's own box and clipping cannot contain it.
+    expect(layering!.parentIsBody).toBe(true)
+    expect(layering!.position).toBe('fixed')
+    // Above the shell's shared portaled-menu level (1100) — a tie there is decided by DOM
+    // order, which is not a contract — and below the document-preview overlays (10000+).
+    expect(layering!.zIndex).toBeGreaterThan(1100)
+    expect(layering!.probes).toEqual([true, true, true])
     // The card's bottom edge lines up with the trigger's bottom edge.
     expect(Math.abs(menuBox!.y + menuBox!.height - (triggerBox!.y + triggerBox!.height))).toBeLessThanOrEqual(12)
     const aboutRow = page.getByRole('menuitem', { name: ABOUT_ITEM })
