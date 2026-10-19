@@ -96,6 +96,20 @@ commits since the previous tag — so a Release page never exists for an artifac
 not proven. E2E is intentionally not part of CI: it needs a local DSH installation and a
 real model API key.
 
+**A failed run can be re-run.** Before uploading, the job asks the registry whether this
+exact version is already there and **skips the upload when it is** — otherwise a re-run
+would die at `npm publish` and never reach the tail. That is what makes a run like
+`0.3.1`'s recoverable: publish succeeded, the verify step went red because an npm CDN edge
+kept serving a cached 404 for the bare tarball URL, and the Release step was therefore
+skipped. The skip is not leniency: the verify step still runs, still names the tagged
+commit (`--expect-git-head`), and still fails when what the registry serves was built from
+another commit — so re-running cannot bless a re-tagged or wrong artifact.
+
+Note the boundary: GitHub re-runs a workflow with the workflow file **at that run's ref**, so
+a run that failed before this check existed keeps its old behaviour. The check pays off on
+the next tag whose run needs a retry — and on a manual `Run workflow` from a branch that
+carries it.
+
 If Trusted Publishing cannot be used (for example a private repository), fall back
 to a granular automation token: add the repository secret `NPM_TOKEN` and insert
 these steps before the publish step (the workflow already targets npmjs and upgrades

@@ -93,18 +93,41 @@ jobs:
       - name: Upgrade npm
         run: npm install --global npm@latest
 
+      # Re-running a failed job must be able to FINISH what it started. `npm publish` refuses
+      # a version that already exists, so without this check a re-run dies at the upload and
+      # never reaches the verify + Release steps below — which is exactly what happened to
+      # 0.3.1 (run 4: publish ok, verify red because of a cached 404, Release skipped, and no
+      # way to retry the tail). Skipping the upload is safe rather than lenient: the verify
+      # step still proves the SERVED artifact was built from THIS commit (`--expect-git-head`),
+      # so a re-tagged or wrong version fails there instead.
+      - name: Check whether this version is already on the registry
+        id: registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "${name}@${version}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${name}@${version} is already published: skipping the upload, verifying what is served."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "${name}@${version} is not on the registry yet: this run publishes it."
+          fi
+
       - name: Publish (dry run)
         if: ${{ inputs.dry_run == true }}
         run: npm publish --dry-run --provenance --access public --registry=https://registry.npmjs.org
 
       - name: Publish
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ inputs.dry_run != true && steps.registry.outputs.exists != 'true' }}
         run: npm publish --provenance --access public --registry=https://registry.npmjs.org
 
       # Read back what the registry actually serves. A green publish step only proves the
       # upload was accepted; this proves the tarball's files, its manifest and the
       # published client bundle are the ones this commit built. The script polls while the
-      # fresh version propagates, and fails the job when the served artifact differs.
+      # fresh version propagates, and fails the job when the served artifact differs. It
+      # runs on a re-run too, which is what keeps the skip above honest.
       - name: Verify the published artifact
         if: ${{ inputs.dry_run != true }}
         shell: bash
@@ -116,7 +139,8 @@ jobs:
       # Last, so a Release page only ever exists for a version whose served artifact was
       # just proven above. `.release-it.json` sets `github.release: false` for exactly
       # this reason: release-it pushes the tag, and this job creates the one release.
-      # `if` keeps it off a branch dispatch, where there is no tag to release.
+      # `if` keeps it off a branch dispatch, where there is no tag to release. The action
+      # matches by tag, so a re-run (or a page created by hand) is updated, not duplicated.
       - name: Create the GitHub Release
         if: ${{ inputs.dry_run != true && startsWith(github.ref, 'refs/tags/v') }}
         uses: softprops/action-gh-release@v2
