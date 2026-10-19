@@ -396,8 +396,7 @@ export function SessionTreePicker({ t, selection, onSelect }: SessionTreePickerP
           data-dsh-shortcut-tree-search=""
           onChange={(event) => { setQuery(event.currentTarget.value) }}
         />
-      </div>
-      <div className={css.treeList} id={listId} role="tree" aria-label={t('picker.treeLabel')} ref={listRef}>
+      </div>      <div className={css.treeList} id={listId} role="tree" aria-label={t('picker.treeLabel')} ref={listRef}>
         {!ready && <p className={css.treeNotice}>{t('picker.loading')}</p>}
         {ready && rows.length === 0 && <p className={css.treeNotice}>{t('picker.noMatch')}</p>}
         {rows.map(renderRow)}

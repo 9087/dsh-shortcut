@@ -74,6 +74,8 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
     sessionId: state.sessionId,
     target: draftTarget(state),
     text: state.text,
+    navigate: state.navigate,
+    anySession: state.anySession,
   }, state.id)
   const canSubmit = checked.ok && !state.submitting
   const editing = state.mode === 'edit'
@@ -87,24 +89,16 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
     )
   }
 
-  const fixedPath = state.sessionId === ''
-    ? t('picker.placeholder')
-    : resolveTargetPath({ kind: 'main' }, state.sessionId, t)
-
-  const targetField = state.sessionFixed
-    ? (
-        <div className={css.sessionFixedRow} data-dsh-shortcut-session-fixed="">
-          <span className={css.sessionFixedValue} title={fixedPath}>{fixedPath}</span>
-          <span className={css.sessionFixedTag}>{t('dialog.sessionFixed')}</span>
-        </div>
-      )
-    : (
-        <SessionTreePicker
-          t={t}
-          selection={state.sessionId === '' ? undefined : { sessionId: state.sessionId, target: state.target }}
-          onSelect={(selection) => { editorStore.selectTarget(selection.sessionId, selection.target) }}
-        />
-      )
+  // One target tree for every flow. A bubble capture only SEEDS the session (and the text);
+  // the tree stays editable, so a capture can be retargeted or made session-agnostic before
+  // it is saved.
+  const targetField = (
+    <SessionTreePicker
+      t={t}
+      selection={state.sessionId === '' ? undefined : { sessionId: state.sessionId, target: state.target }}
+      onSelect={(selection) => { editorStore.selectTarget(selection.sessionId, selection.target) }}
+    />
+  )
 
   const problem = state.problem !== undefined && state.problem !== 'name-taken'
     ? errorText(t, state.problem)
@@ -165,6 +159,20 @@ export function ShortcutEditorDialog({ t }: EditorDialogProps): ReactNode {
             onChange={(event) => { editorStore.patch({ text: event.currentTarget.value }) }}
           />
         </label>
+
+        {/* Where the text goes: this record's own target, or whichever session is shown
+            when the record is triggered. */}
+        <div className={`${css.field} ${css.formWide}`} data-dsh-shortcut-any-session="">
+          <div className={css.switchRow}>
+            <span className={css.fieldLabel}>{t('dialog.anySessionLabel')}</span>
+            <Switch
+              checked={state.anySession}
+              onChange={(next) => { editorStore.patch({ anySession: next }) }}
+              label={t('dialog.anySessionLabel')}
+            />
+          </div>
+          <span className={css.switchHint}>{t('dialog.anySessionHint')}</span>
+        </div>
 
         {/* Behaviour after delivery: open the target (default), or stay put. */}
         <div className={`${css.field} ${css.formWide}`} data-dsh-shortcut-navigate="">

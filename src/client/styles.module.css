@@ -373,40 +373,6 @@
   text-overflow: ellipsis;
 }
 
-.sessionFixedRow {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-module-platform);
-}
-
-.sessionFixedValue {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--dsw-alias-label-primary);
-  font-size: 14px;
-  line-height: 22px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.sessionFixedTag {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: var(--dsw-radius-xs);
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
-}
-
 .problem {
   margin: 0;
   color: var(--dsw-alias-state-error-primary);

@@ -86,10 +86,22 @@ function entryOf(value: unknown): ShortcutEntry {
     text: row.text,
     // Records written before the switch existed arrive without the field.
     navigate: row.navigate !== false,
+    // Only an explicit `true` is session-agnostic; a missing field is the bound default.
+    anySession: row.anySession === true,
     target,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+/** What the host confirms about one delivery. */
+export interface ShortcutDelivery {
+  name: string
+  /** The session that actually received the text — the caller's own, for an any-session record. */
+  sessionId: string
+  target: ShortcutTarget
+  navigate: boolean
+  anySession: boolean
 }
 
 /** The business verbs the browser half calls. */
@@ -157,15 +169,24 @@ export class ShortcutApi {
   /**
    * Deliver one record's text into its addressed agent.
    * @param id - record identity.
-   * @returns the record name plus the session and target the host delivered to.
+   * @param currentSessionId - the session the page is showing. Required by an any-session
+   *   record (it delivers there), ignored by every other record.
+   * @returns the record name plus the session and target the host actually delivered to.
    */
-  async send(id: string): Promise<{ name: string; sessionId: string; target: ShortcutTarget; navigate: boolean }> {
-    const value = recordOf(await this.call('send', { id }))
+  async send(id: string, currentSessionId?: string | undefined): Promise<ShortcutDelivery> {
+    const payload = currentSessionId === undefined ? { id } : { id, currentSessionId }
+    const value = recordOf(await this.call('send', payload))
     const entry = recordOf(value?.entry)
     const target = targetOf(entry?.target)
     if (entry === undefined || typeof entry.name !== 'string' || typeof entry.sessionId !== 'string' || target === undefined) {
       throw new ShortcutFailure('send-failed', 'the host did not confirm the delivery')
     }
-    return { name: entry.name, sessionId: entry.sessionId, target, navigate: entry.navigate !== false }
+    return {
+      name: entry.name,
+      sessionId: entry.sessionId,
+      target,
+      navigate: entry.navigate !== false,
+      anySession: entry.anySession === true,
+    }
   }
 }

@@ -96,7 +96,8 @@ function isEntry(value: unknown): value is ShortcutEntry {
   if (typeof value !== 'object' || value === null) return false
   const row = value as Record<string, unknown>
   const navigateOk = row.navigate === undefined || typeof row.navigate === 'boolean'
-  return commonFields(row) && navigateOk && isStoredTarget(row.target, row.sessionId as string)
+  const anySessionOk = row.anySession === undefined || typeof row.anySession === 'boolean'
+  return commonFields(row) && navigateOk && anySessionOk && isStoredTarget(row.target, row.sessionId as string)
 }
 
 /** Whether a parsed value is a legacy version-1 record. */
@@ -113,6 +114,7 @@ function migrateLegacy(entry: Record<string, unknown>): ShortcutEntry {
     sessionId: entry.sessionId as string,
     text: entry.text as string,
     navigate: true,
+    anySession: false,
     target: { kind: 'main' },
     createdAt: entry.createdAt as number,
     updatedAt: entry.updatedAt as number,
@@ -142,10 +144,12 @@ function parseFile(text: string): ShortcutEntry[] {
     throw new StoreFailure('store-unavailable', `entries.json has unsupported version ${String(file.version)}`)
   }
   if (!file.entries.every(isEntry)) throw new StoreFailure('store-unavailable', 'entries.json has malformed entries')
-  // Records written before the navigate switch existed default to true.
+  // Records written before a switch existed take that switch's default: navigate
+  // was on from the start, any-session was off.
   return file.entries.map(entry => ({
     ...entry,
     navigate: entry.navigate !== false,
+    anySession: entry.anySession === true,
     target: { ...entry.target },
   }))
 }
@@ -252,6 +256,7 @@ export class ShortcutStore {
         sessionId: checked.draft.sessionId,
         text: checked.draft.text,
         navigate: checked.draft.navigate,
+        anySession: checked.draft.anySession,
         target: { ...checked.draft.target },
         createdAt: now,
         updatedAt: now,
@@ -284,6 +289,7 @@ export class ShortcutStore {
         sessionId: checked.draft.sessionId,
         text: checked.draft.text,
         navigate: checked.draft.navigate,
+        anySession: checked.draft.anySession,
         target: { ...checked.draft.target },
         updatedAt: Date.now(),
       }

@@ -48,6 +48,7 @@ export interface ValidDraft {
   target: ShortcutTarget
   text: string
   navigate: boolean
+  anySession: boolean
 }
 
 /** Whether one value is a known target kind. */
@@ -145,6 +146,10 @@ export function validateDraft(
       // older client, or a record written before the switch existed) is the
       // default: open the target.
       navigate: draft.navigate !== false,
+      // Same polarity rule for the any-session switch: only an explicit `true`
+      // makes a record session-agnostic, so a draft from an older client stays
+      // bound to its own session.
+      anySession: draft.anySession === true,
     },
   }
 }

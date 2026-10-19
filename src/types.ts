@@ -80,6 +80,18 @@ export interface ShortcutEntry {
    * this field existed are read as true.
    */
   navigate: boolean
+  /**
+   * Whether this shortcut ignores its stored session and delivers to whichever
+   * session the caller is SHOWING at trigger time — that session's main agent.
+   * Defaults to false; records written before this field existed are read as
+   * false, which is the bound-to-one-session behaviour.
+   *
+   * `sessionId` and `target` stay recorded even when this is true: they are the
+   * home the record was captured from and what the Settings page shows. A caller
+   * with no session on screen is refused (`no-current-session`) rather than
+   * redirected to the stored one.
+   */
+  anySession: boolean
   /** Which agent inside `sessionId` receives the text. */
   target: ShortcutTarget
   /** Unix epoch ms of creation. */
@@ -102,6 +114,8 @@ export interface ShortcutDraft {
   text: string
   /** Open the target after delivery; omitted means true (the default). */
   navigate?: boolean
+  /** Deliver to the caller's shown session instead of the stored one; omitted means false. */
+  anySession?: boolean
 }
 
 /** An edit address: the id plus the full replacement draft. */
@@ -132,6 +146,12 @@ export type ShortcutErrorCode =
   | 'parent-unavailable'
   /** The addressed agent no longer exists or is not addressable from that parent. */
   | 'target-unavailable'
+  /**
+   * An `anySession` record was triggered while no session was on screen, so there
+   * is nowhere to deliver it: the record deliberately does not fall back to its
+   * stored session.
+   */
+  | 'no-current-session'
   /** Delivery failed for any other reason. */
   | 'send-failed'
 
@@ -174,6 +194,11 @@ export interface RemoveRequest {
 export interface SendRequest {
   readonly kind: 'send'
   readonly id: string
+  /**
+   * The session the caller is showing. Required for an `anySession` record, which
+   * delivers here instead of to its stored session; ignored for every other record.
+   */
+  readonly currentSessionId?: string
 }
 
 /** Every request this channel accepts. */

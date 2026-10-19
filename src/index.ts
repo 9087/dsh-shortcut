@@ -143,6 +143,7 @@ function draftOf(payload: unknown): ShortcutDraft | undefined {
     target: draft.target as ShortcutTarget,
     text: draft.text as string,
     ...(typeof draft.navigate === 'boolean' ? { navigate: draft.navigate } : {}),
+    ...(typeof draft.anySession === 'boolean' ? { anySession: draft.anySession } : {}),
   }
 }
 
@@ -160,6 +161,7 @@ function editOf(payload: unknown): ShortcutEdit | undefined {
       target: draft.target as ShortcutTarget,
       text: draft.text as string,
       ...(typeof draft.navigate === 'boolean' ? { navigate: draft.navigate } : {}),
+      ...(typeof draft.anySession === 'boolean' ? { anySession: draft.anySession } : {}),
     },
   }
 }
@@ -168,6 +170,12 @@ function editOf(payload: unknown): ShortcutEdit | undefined {
 function idOf(payload: unknown): string | undefined {
   const id = objectOf(payload)?.id
   return typeof id === 'string' && id.length > 0 ? id : undefined
+}
+
+/** Read the caller's shown session out of a send request, when it named one. */
+function currentSessionOf(payload: unknown): string | undefined {
+  const value = objectOf(payload)?.currentSessionId
+  return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 /**
@@ -212,28 +220,45 @@ export function apply(ctx: Context): void {
 
   /**
    * Deliver one record's text to its addressed agent.
+   *
+   * A record with `anySession` set is addressed by the CALLER, not by the store: it
+   * delivers to the session the caller is showing (that session's main agent), and a
+   * caller that named none is refused — the record deliberately does not fall back to
+   * the session it was captured from, because that is the behaviour the switch turns off.
    * @param id - record identity.
    * @param signal - caller cancellation for the admission round-trip.
+   * @param currentSessionId - the session the caller is showing, when it named one.
    * @returns the accepted marker, or a classified failure.
    */
-  const deliver = async (id: string, signal: AbortSignal): Promise<HandlerResult> => {
+  const deliver = async (
+    id: string,
+    signal: AbortSignal,
+    currentSessionId: string | undefined,
+  ): Promise<HandlerResult> => {
     const entry = await store.get(id)
     if (entry === undefined) return fail('not-found', `no shortcut with id ${id}`)
+    if (entry.anySession && currentSessionId === undefined) {
+      return fail('no-current-session', `"${entry.name}" is sendable to any session, but the caller showed none`)
+    }
+    // Where this delivery really goes: the caller's session for an any-session record
+    // (always that session's own agent), the stored address otherwise.
+    const sessionId = entry.anySession ? currentSessionId as string : entry.sessionId
+    const target: ShortcutTarget = entry.anySession ? { kind: 'main' } : entry.target
     const text = entry.text
     try {
-      if (entry.target.kind === 'main') {
+      if (target.kind === 'main') {
         const controller = ctx.get('sessionController') as SessionControllerSurface | undefined
         if (controller === undefined || typeof controller.prompt !== 'function') {
           return fail('send-failed', 'the host session service is unavailable')
         }
         await controller.prompt({
           requestId: randomUUID(),
-          sessionId: entry.sessionId,
+          sessionId,
           mode: 'queue',
           content: [{ type: 'text', text }],
         }, signal)
       } else {
-        const childSessionId = entry.target.childSessionId
+        const childSessionId = target.childSessionId
         if (childSessionId === undefined || childSessionId.length === 0) {
           return fail('invalid-input', 'the target has no child session id')
         }
@@ -243,7 +268,7 @@ export function apply(ctx: Context): void {
         }
         await subagents.prompt({
           requestId: randomUUID(),
-          parentSessionId: entry.sessionId,
+          parentSessionId: sessionId,
           childSessionId,
           mode: 'continuable',
           delivery: 'queue',
@@ -252,7 +277,7 @@ export function apply(ctx: Context): void {
       }
     } catch (error: unknown) {
       const failure = sendFailure(error)
-      ctx.logger.warn(`dsh-shortcut: delivering "${entry.name}" (${entry.target.kind}) failed (${failure.code}): ${failure.message}`)
+      ctx.logger.warn(`dsh-shortcut: delivering "${entry.name}" (${target.kind}) failed (${failure.code}): ${failure.message}`)
       return fail(failure.code, failure.message)
     }
     return value({
@@ -260,9 +285,12 @@ export function apply(ctx: Context): void {
       entry: {
         id: entry.id,
         name: entry.name,
-        sessionId: entry.sessionId,
-        target: { ...entry.target },
+        // The receipt names the session that ACTUALLY received it, so a client that
+        // navigates afterwards follows the any-session record to where it landed.
+        sessionId,
+        target: { ...target },
         navigate: entry.navigate,
+        anySession: entry.anySession,
       },
     })
   }
@@ -292,7 +320,7 @@ export function apply(ctx: Context): void {
         case 'send': {
           const id = idOf(payload)
           if (id === undefined) return fail('invalid-input', 'send needs an id')
-          return await deliver(id, signal)
+          return await deliver(id, signal, currentSessionOf(payload))
         }
         default:
           return fail('invalid-input', `unknown endpoint ${JSON.stringify(endpoint)}`)

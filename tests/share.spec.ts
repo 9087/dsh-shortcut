@@ -81,8 +81,24 @@ describe('validateDraft', () => {
     const result = validateDraft([], draft({ name: '  重启服务 ', sessionId: ' session-a ', text: '  重启  ' }))
     expect(result).toEqual({
       ok: true,
-      draft: { name: '重启服务', sessionId: 'session-a', target: { kind: 'main' }, text: '重启', navigate: true },
+      draft: {
+        name: '重启服务',
+        sessionId: 'session-a',
+        target: { kind: 'main' },
+        text: '重启',
+        navigate: true,
+        anySession: false,
+      },
     })
+  })
+
+  it('defaults any-session off, and keeps an explicit on', () => {
+    const off = validateDraft([], draft())
+    expect(off.ok && (off as { draft: { anySession: boolean } }).draft.anySession).toBe(false)
+    // Only an explicit `true` makes a record session-agnostic; anything else is the bound
+    // default, which is what an older client (no field at all) must keep getting.
+    const on = validateDraft([], draft({ anySession: true }))
+    expect(on.ok && (on as { draft: { anySession: boolean } }).draft.anySession).toBe(true)
   })
 
   it('defaults navigation on, and keeps an explicit off', () => {
@@ -102,6 +118,7 @@ describe('validateDraft', () => {
         target: { kind: 'member', childSessionId: 'child-1', leafLabel: 'writer', ancestors: ['session-a'] },
         text: 'x',
         navigate: true,
+        anySession: false,
       },
     })
   })

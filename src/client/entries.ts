@@ -12,8 +12,8 @@
 
 import { useSyncExternalStore } from 'react'
 import { ShortcutFailure } from './api.ts'
-import type { ShortcutApi } from './api.ts'
-import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutErrorCode, ShortcutTarget } from '../types.ts'
+import type { ShortcutApi, ShortcutDelivery } from './api.ts'
+import type { ShortcutDraft, ShortcutEdit, ShortcutEntry, ShortcutErrorCode } from '../types.ts'
 
 /** Load lifecycle of the shared list. */
 export type EntriesPhase = 'idle' | 'loading' | 'ready' | 'error'
@@ -130,12 +130,14 @@ export class EntriesStore {
   /**
    * Deliver one record without touching the list.
    * @param id - record identity.
+   * @param currentSessionId - the session the page is showing, which an any-session
+   *   record delivers to instead of its stored one.
    * @returns the host's delivery receipt.
    */
-  async send(id: string): Promise<{ name: string; sessionId: string; target: ShortcutTarget; navigate: boolean }> {
+  async send(id: string, currentSessionId?: string | undefined): Promise<ShortcutDelivery> {
     const api = this.api
     if (api === undefined) throw new ShortcutFailure('send-failed', 'the store is not connected')
-    return api.send(id)
+    return api.send(id, currentSessionId)
   }
 
   /** Find one record in the current list. */

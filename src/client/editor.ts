@@ -44,10 +44,13 @@ export interface EditorState {
   sessionId: string
   /** Selected agent inside `sessionId`. */
   target: EditorTarget
-  /** The target came from the bubble and cannot be changed here. */
-  sessionFixed: boolean
   /** Open the target after delivery (the dialog's "jump to that session" switch). */
   navigate: boolean
+  /**
+   * Deliver to whichever session is shown at trigger time instead of this record's
+   * own (the dialog's "sendable to any session" switch).
+   */
+  anySession: boolean
   text: string
   submitting: boolean
   /** Last refusal, as a code the dialog localizes. */
@@ -66,8 +69,8 @@ const CLOSED: EditorState = {
   name: '',
   sessionId: '',
   target: { kind: 'main' },
-  sessionFixed: false,
   navigate: true,
+  anySession: false,
   text: '',
   submitting: false,
 }
@@ -106,6 +109,10 @@ export class EditorStore {
 
   /**
    * Open the dialog for a message-bubble capture.
+   *
+   * The bubble SEEDS the session and the text; it does not pin the target. The tree stays
+   * fully editable, so a capture can be retargeted — to another session, to one of its
+   * agents, or turned into an any-session shortcut — before it is saved.
    * @param input - the bubble's session and text, when known.
    */
   openCapture(input: CaptureInput): void {
@@ -114,7 +121,6 @@ export class EditorStore {
       open: true,
       mode: 'create',
       sessionId: input.sessionId ?? '',
-      sessionFixed: input.sessionId !== undefined,
       text: input.text,
     })
   }
@@ -143,6 +149,7 @@ export class EditorStore {
         ...(entry.target.ancestors === undefined ? {} : { ancestors: [...entry.target.ancestors] }),
       },
       navigate: entry.navigate,
+      anySession: entry.anySession,
       text: entry.text,
     })
   }
@@ -157,7 +164,7 @@ export class EditorStore {
    * Change one field.
    * @param patch - the fields to overwrite.
    */
-  patch(patch: Partial<Pick<EditorState, 'name' | 'text' | 'sessionId' | 'target' | 'navigate'>>): void {
+  patch(patch: Partial<Pick<EditorState, 'name' | 'text' | 'sessionId' | 'target' | 'navigate' | 'anySession'>>): void {
     this.publish({ ...this.state, ...patch, problem: undefined })
   }
 
@@ -194,6 +201,7 @@ export class EditorStore {
       target: rawTarget,
       text: state.text,
       navigate: state.navigate,
+      anySession: state.anySession,
     }
     const checked = validateDraft(entriesStore.getSnapshot().entries, draft, state.id)
     if (!checked.ok) {

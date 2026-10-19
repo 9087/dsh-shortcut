@@ -24,7 +24,9 @@ import { bannerStore, mountedHosts } from '../editor.ts'
 import { entriesStore, useEntries } from '../entries.ts'
 import { errorText } from '../locale.ts'
 import type { Translate } from '../locale.ts'
+import { groupShortcuts, shortcutRows } from '../menu-groups.ts'
 import { openDeliveredTarget } from '../navigation.ts'
+import { useCurrentSessionId } from '../session-bridge.ts'
 import { targetShortLabel } from '../catalog.ts'
 import { ShortcutIcon } from './ShortcutIcon.tsx'
 import { ShortcutEditorDialog } from './EditorDialog.tsx'
@@ -51,6 +53,9 @@ export interface FooterEntryProps {
  */
 export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
   const list = useEntries()
+  // Which session the page is showing. The menu groups by it, so it has to be a
+  // render-reactive value, not the module's last-known id (see `useCurrentSessionId`).
+  const currentSessionId = useCurrentSessionId()
   const [open, setOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
 
@@ -66,6 +71,14 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
     if (open) entriesStore.ensureLoaded()
   }, [open])
 
+  // The records split by the session on screen: the current session's shortcuts first,
+  // then everything else. Both groups are flat heading rows in one always-open card, so
+  // there is no expanded state to keep.
+  const groups = useMemo(
+    () => groupShortcuts(list.entries, currentSessionId),
+    [list.entries, currentSessionId],
+  )
+
   const items = useMemo<MenuEntry[]>(() => {
     // The last row is always the about entry, separated from the records (or
     // from the empty/load-failure note) so it never reads as another shortcut.
@@ -77,13 +90,15 @@ export function ShortcutFooterEntry({ wide, t }: FooterEntryProps): ReactNode {
     if (list.entries.length === 0) {
       return [{ type: 'label', id: 'empty', text: t('menu.empty') }, separator, about]
     }
-    return [...list.entries.map(entry => ({ id: entry.id, label: entry.name })), separator, about]
-  }, [list.entries, list.phase, t])
+    return [...shortcutRows(groups, t), separator, about]
+  }, [groups, list.entries.length, list.phase, t])
 
   const deliver = async (id: string): Promise<void> => {
     setOpen(false)
     try {
-      const receipt = await entriesStore.send(id)
+      // The shown session is handed over on every delivery: an any-session record
+      // delivers there, and the host ignores it for every other record.
+      const receipt = await entriesStore.send(id, currentSessionId)
       bannerStore.show(t('toast.sent', { target: targetShortLabel(receipt.target, receipt.sessionId, t) }), { tone: 'success' })
       if (receipt.navigate) openDeliveredTarget(receipt)
     } catch (error: unknown) {

@@ -166,3 +166,16 @@ export function useBridgeRevision(): number {
     () => revision,
   )
 }
+
+/**
+ * The session the page is showing, as a value React re-renders on.
+ *
+ * The seat publishes on every session switch and withdraws on unmount, so this tracks the
+ * conversation actually on screen — including the "no session view" case (the Settings
+ * page), which answers undefined rather than the last session that was open.
+ * @returns the shown session id, or undefined when no session view is mounted.
+ */
+export function useCurrentSessionId(): string | undefined {
+  useBridgeRevision()
+  return currentSessionId
+}

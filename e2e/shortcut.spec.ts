@@ -57,6 +57,16 @@ const SENT_BANNER = /已发送到|Sent to/
 const TAB_LABEL = /快捷方式|Shortcuts/
 /** The menu's last item, in either UI language. */
 const ABOUT_ITEM = /关于此菜单|About this menu/
+/** The menu's current-session group heading, in either UI language. */
+const CURRENT_GROUP = /^(当前会话|Current session)$/
+/** The menu's other-sessions group heading, in either UI language. */
+const OTHER_GROUP = /^(其他会话|Other sessions)$/
+/** The menu's any-session group heading, in either UI language. */
+const ANY_GROUP = /^(任意会话|Any session)$/
+/** A substring of `CAPTURE_TEXT` that identifies session A in the sidebar (short, so a truncated title still matches). */
+const FIRST_PROBE = LOCALE === 'en' ? 'Restart the dev' : '重启服务'
+/** A search query the capture dialog's tree must still match (it derives from `CAPTURE_TEXT`). */
+const TREE_QUERY = LOCALE === 'en' ? 'Restart' : '重启'
 
 let fixture: Fixture
 let browser: Browser
@@ -191,6 +201,32 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(navigate).toContainText(/跳转到该会话|Jump to the session/)
     const navSwitch = navigate.getByRole('switch')
     await expect(navSwitch).toHaveAttribute('aria-checked', 'true')
+    // The any-session switch is there too, off by default: a captured record stays bound
+    // to the session it came from unless the reader says otherwise.
+    const anySession = page.locator('[data-dsh-shortcut-any-session]')
+    await expect(anySession).toBeVisible()
+    await expect(anySession).toContainText(/可发送给任意会话|Sendable to any session/)
+    await expect(anySession.getByRole('switch')).toHaveAttribute('aria-checked', 'false')
+
+    // The target tree is drawn, seeded at the bubble's session and REVEALED there — and it
+    // is a control, not context: a capture can be retargeted (another session, one of its
+    // agents, or made session-agnostic) before it is saved.
+    const picker = page.locator('[data-dsh-shortcut-picker]')
+    await expect(picker).toBeVisible()
+    await expect(picker).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(picker.locator('[data-dsh-shortcut-selected]')).toBeVisible({ timeout: 15_000 })
+    const search = picker.locator('[data-dsh-shortcut-tree-search]')
+    await expect(search).toBeEnabled()
+    const sessionRow = picker.locator('[data-dsh-shortcut-tree-session]').first()
+    await expect(sessionRow).toBeEnabled()
+    // The tree answers a search, which is the cheap proof that it is live. The query
+    // MATCHES on purpose: a term that matches nothing re-derives the tree's expanded set
+    // from an empty result, so clearing it leaves the tree collapsed — legal, but not
+    // something this test wants to assert about a control it only needs to be interactive.
+    await search.fill(TREE_QUERY)
+    await expect(sessionRow).toBeVisible({ timeout: 10_000 })
+    await search.fill('')
+    await expect(sessionRow).toBeVisible({ timeout: 10_000 })
 
     await name.fill(SHORTCUT_NAME)
     await expect(confirm).toBeEnabled()
@@ -205,6 +241,7 @@ test.describe('dsh-shortcut (real Chromium)', () => {
       sessionId: sessionA,
       text: CAPTURE_TEXT,
       navigate: true,
+      anySession: false,
       target: { kind: 'main' },
     })
   })
@@ -297,6 +334,165 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await secondRow.click({ timeout: 20_000 })
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(1)
+  })
+
+  test('3b. the menu groups by the session on screen, current first and the rest after', async () => {
+    // Starts where 3 left off: the shell shows B, and the only record targets A, so every
+    // record belongs to the OTHER group.
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
+    const trigger = page.locator('[data-dsh-shortcut-trigger]')
+    const menu = page.getByRole('menu')
+
+    await trigger.click()
+    await expect(menu).toBeVisible()
+    // B has no shortcut of its own, so only the other-sessions heading is drawn: a
+    // heading over an empty group is exactly what the grouping must NOT produce.
+    await expect(menu.getByText(OTHER_GROUP)).toHaveCount(1)
+    await expect(menu.getByText(CURRENT_GROUP)).toHaveCount(0)
+    const otherHeadingBox = await menu.getByText(OTHER_GROUP).first().boundingBox()
+    const recordBox = await page.getByRole('menuitem', { name: SHORTCUT_NAME }).boundingBox()
+    expect(otherHeadingBox).not.toBeNull()
+    expect(recordBox).not.toBeNull()
+    // The heading sits ABOVE the row it heads.
+    expect(otherHeadingBox!.y).toBeLessThan(recordBox!.y)
+
+    // The heading is the shell's own heading treatment rather than a second row: smaller
+    // and LIGHTER than the selectable rows below it.
+    //
+    // The leaf-only filter is load-bearing: the list's scroll viewport ALSO carries
+    // role="presentation" and wraps every row, so picking the first match reads the
+    // container and its inherited body color instead of the heading's own.
+    const tones = await page.evaluate(() => {
+      const menu = document.querySelector('[role="menu"]')
+      if (menu === null) return null
+      const heading = [...menu.querySelectorAll('[role="presentation"]')]
+        .find(node => node.children.length === 0
+          && /当前会话|其他会话|Current session|Other sessions/.test(node.textContent ?? ''))
+      const row = menu.querySelector('[role="menuitem"]')
+      if (heading === undefined || row === null) return null
+      const headingStyle = getComputedStyle(heading)
+      const rowStyle = getComputedStyle(row)
+      /** Perceived lightness of an `rgb(...)`/`rgba(...)` color, 0..255. */
+      const lightness = (color: string): number => {
+        const [r, g, b] = (color.match(/\d+(?:\.\d+)?/g) ?? ['0', '0', '0']).map(Number)
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+      }
+      return {
+        headingColor: headingStyle.color,
+        rowColor: rowStyle.color,
+        headingLightness: lightness(headingStyle.color),
+        rowLightness: lightness(rowStyle.color),
+        headingSize: Number.parseFloat(headingStyle.fontSize),
+        rowSize: Number.parseFloat(rowStyle.fontSize),
+      }
+    })
+    expect(tones).not.toBeNull()
+    expect(tones!.headingColor).not.toBe(tones!.rowColor)
+    expect(tones!.headingLightness).toBeGreaterThan(tones!.rowLightness)
+    expect(tones!.headingSize).toBeLessThan(tones!.rowSize)
+
+    // Open A, the session the record targets.
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+    await page.getByRole('treeitem').filter({ hasText: FIRST_PROBE }).first().click({ timeout: 20_000 })
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toBeAttached({ timeout: 15_000 })
+
+    // Now the shown session IS the record's, so it moves under the current-session
+    // heading, and the other heading goes away with its now-empty group.
+    await trigger.click()
+    await expect(menu).toBeVisible()
+    await expect(menu.getByText(CURRENT_GROUP)).toHaveCount(1)
+    await expect(menu.getByText(OTHER_GROUP)).toHaveCount(0)
+    const currentHeadingBox = await menu.getByText(CURRENT_GROUP).first().boundingBox()
+    const movedBox = await page.getByRole('menuitem', { name: SHORTCUT_NAME }).boundingBox()
+    expect(currentHeadingBox).not.toBeNull()
+    expect(movedBox).not.toBeNull()
+    expect(currentHeadingBox!.y).toBeLessThan(movedBox!.y)
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+
+    // Leave the shell on B, which is the state every later test was written against.
+    await page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first().click({ timeout: 20_000 })
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
+  })
+
+  test('3c. the any-session switch re-groups the record and delivers to whoever is on screen', async () => {
+    // Both halves of the switch's meaning, from the real editor: the menu moves the record
+    // into its own group, and a click delivers it to the session being VIEWED rather than
+    // the one it was captured from. The switch is turned back off at the end, so the tests
+    // after this one see the plain bound record they were written against.
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
+    const trigger = page.locator('[data-dsh-shortcut-trigger]')
+    const menu = page.getByRole('menu')
+
+    /** Settings → Shortcuts → this record's editor, open. */
+    const openEditor = async (): Promise<void> => {
+      await page.locator('[data-slot="sidebar.settings"] button').first().click()
+      const tab = page.locator('button[class*="navCell"]').filter({ hasText: TAB_LABEL }).first()
+      await expect(tab).toBeVisible({ timeout: 15_000 })
+      await tab.click()
+      const row = page.locator('[data-dsh-shortcut-row]').filter({ hasText: SHORTCUT_NAME })
+      await expect(row).toBeVisible({ timeout: 15_000 })
+      await row.locator('[data-dsh-shortcut-edit]').click()
+      await expect(page.locator('[data-dsh-shortcut-name]')).toHaveValue(SHORTCUT_NAME)
+    }
+    /** Close the editor and go back to B's conversation. */
+    const backToB = async (): Promise<void> => {
+      await page.keyboard.press('Escape')
+      await expect(page.locator('[data-dsh-shortcut-name]')).toBeHidden({ timeout: 15_000 })
+      await page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first().click({ timeout: 20_000 })
+      await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
+    }
+    /** Save the open editor and wait for the store to answer. */
+    const save = async (expected: boolean): Promise<void> => {
+      await page.locator('[data-dsh-shortcut-confirm]').click()
+      await expect(page.locator('[data-dsh-shortcut-name]')).toBeHidden({ timeout: 15_000 })
+      await expect.poll(() => storedEntries()[0]?.anySession, { timeout: 10_000 }).toBe(expected)
+    }
+
+    await openEditor()
+    const anySwitch = page.locator('[data-dsh-shortcut-any-session]').getByRole('switch')
+    await expect(anySwitch).toHaveAttribute('aria-checked', 'false')
+    // In EDIT the tree is a control, not context: this switch is not what unlocks it.
+    await expect(page.locator('[data-dsh-shortcut-picker]')).not.toHaveAttribute('aria-disabled', 'true')
+    await anySwitch.click()
+    await expect(anySwitch).toHaveAttribute('aria-checked', 'true')
+    await save(true)
+
+    // Where the record came from no longer decides anything: it is triggered from B below.
+    await backToB()
+    await trigger.click()
+    await expect(menu).toBeVisible()
+    // It left the session groups entirely and got a heading of its own.
+    await expect(menu.getByText(ANY_GROUP)).toHaveCount(1)
+    await expect(menu.getByText(OTHER_GROUP)).toHaveCount(0)
+    await expect(menu.getByText(CURRENT_GROUP)).toHaveCount(0)
+    const anyHeading = await menu.getByText(ANY_GROUP).first().boundingBox()
+    const anyRow = await page.getByRole('menuitem', { name: SHORTCUT_NAME }).boundingBox()
+    expect(anyHeading).not.toBeNull()
+    expect(anyRow).not.toBeNull()
+    expect(anyHeading!.y).toBeLessThan(anyRow!.y)
+
+    // Triggering it delivers into B — the session on screen — not into A, where it came from.
+    const bubblesInB = await page.locator('[data-chat-flow-kind="user"]').count()
+    await page.getByRole('menuitem', { name: SHORTCUT_NAME }).click()
+    await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
+    // The jump switch is on, so it navigates to where it delivered — which is here.
+    await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
+    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(bubblesInB + 1, { timeout: 30_000 })
+
+    // Back off, and back into the ordinary grouping.
+    await openEditor()
+    await expect(anySwitch).toHaveAttribute('aria-checked', 'true')
+    await anySwitch.click()
+    await expect(anySwitch).toHaveAttribute('aria-checked', 'false')
+    await save(false)
+    await backToB()
+    await trigger.click()
+    await expect(menu.getByText(OTHER_GROUP)).toHaveCount(1)
+    await expect(menu.getByText(ANY_GROUP)).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
   })
 
   test('4. the Settings page edits, adds and deletes records', async () => {

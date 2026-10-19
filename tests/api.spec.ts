@@ -24,6 +24,7 @@ const ENTRY = {
   sessionId: 'session-a',
   text: '重启',
   navigate: true,
+  anySession: false,
   target: { kind: 'main' as const },
   createdAt: 10,
   updatedAt: 20,
@@ -60,12 +61,31 @@ describe('ShortcutApi', () => {
       sessionId: ENTRY.sessionId,
       target: { kind: 'main' },
       navigate: true,
+      anySession: false,
     })
     expect(calls.map(call => call.endpoint)).toEqual(['create', 'update', 'remove', 'send'])
     expect(calls[0]?.payload).toEqual({ draft: DRAFT })
     expect(calls[1]?.payload).toEqual({ edit: { id: 'id-1', draft: DRAFT } })
     expect(calls[2]?.payload).toEqual({ id: 'id-1' })
+    // No shown session was named, so the payload carries none: the host refuses an
+    // any-session record rather than guessing.
     expect(calls[3]?.payload).toEqual({ id: 'id-1' })
+  })
+
+  it('hands the shown session to the host on send, and only on send', async () => {
+    const { rpc, calls } = fakeRpc(() => ({ ok: true, value: { entry: { ...ENTRY, anySession: true } } }))
+    const api = new ShortcutApi(rpc)
+    const receipt = await api.send('id-1', 'session-shown')
+    expect(calls[0]?.payload).toEqual({ id: 'id-1', currentSessionId: 'session-shown' })
+    // The receipt reports what the host actually did: an any-session delivery is always
+    // the shown session's own agent, and it says so.
+    expect(receipt).toEqual({
+      name: ENTRY.name,
+      sessionId: ENTRY.sessionId,
+      target: { kind: 'main' },
+      navigate: true,
+      anySession: true,
+    })
   })
 
   it('reads the navigate switch, defaulting a legacy record to true', async () => {
@@ -74,6 +94,14 @@ describe('ShortcutApi', () => {
     const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [legacy, { ...ENTRY, navigate: false }] } }))
     const entries = await new ShortcutApi(rpc).list()
     expect(entries.map(entry => entry.navigate)).toEqual([true, false])
+  })
+
+  it('reads the any-session switch, defaulting a legacy record to off', async () => {
+    const legacy = { ...ENTRY }
+    delete (legacy as { anySession?: boolean }).anySession
+    const { rpc } = fakeRpc(() => ({ ok: true, value: { entries: [legacy, { ...ENTRY, anySession: true }] } }))
+    const entries = await new ShortcutApi(rpc).list()
+    expect(entries.map(entry => entry.anySession)).toEqual([false, true])
   })
 
   it('keeps the host\'s business failure code', async () => {

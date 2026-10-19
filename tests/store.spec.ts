@@ -94,6 +94,7 @@ describe('ShortcutStore', () => {
       sessionId: 'session-old',
       text: '旧内容',
       navigate: true,
+      anySession: false,
       target: { kind: 'main' },
       createdAt: 7,
       updatedAt: 9,
@@ -117,7 +118,8 @@ describe('ShortcutStore', () => {
     expect(off.navigate).toBe(false)
     const on = await store.create(draft({ name: 'jump' }))
     expect(on.navigate).toBe(true)
-    // A version-2 record written before the switch existed reads as true.
+    // A version-2 record written before either switch existed reads as the defaults:
+    // navigate on, any-session off.
     writeFileSync(storeFile(dir), JSON.stringify({
       version: 2,
       entries: [{
@@ -126,9 +128,31 @@ describe('ShortcutStore', () => {
       }],
     }))
     await expect(new ShortcutStore(dir).list()).resolves.toEqual([{
-      id: 'old', name: 'old', sessionId: 's', text: 't', navigate: true,
+      id: 'old', name: 'old', sessionId: 's', text: 't', navigate: true, anySession: false,
       target: { kind: 'main' }, createdAt: 1, updatedAt: 2,
     }])
+  })
+
+  it('persists an explicit anySession=true, and refuses a non-boolean one', async () => {
+    const dir = freshDir()
+    const store = new ShortcutStore(dir)
+    const bound = await store.create(draft({ name: 'bound' }))
+    expect(bound.anySession).toBe(false)
+    const anywhere = await store.create(draft({ name: 'anywhere', anySession: true }))
+    expect(anywhere.anySession).toBe(true)
+    // It survives the round trip through the file, not just the in-memory answer.
+    const reopened = await new ShortcutStore(dir).list()
+    expect(reopened.map(entry => entry.anySession)).toEqual([false, true])
+
+    writeFileSync(storeFile(dir), JSON.stringify({
+      version: 2,
+      entries: [{
+        id: 'bad', name: 'bad', sessionId: 's', text: 't',
+        anySession: 'yes',
+        target: { kind: 'main' }, createdAt: 1, updatedAt: 2,
+      }],
+    }))
+    await expect(new ShortcutStore(dir).list()).rejects.toMatchObject({ code: 'store-unavailable' })
   })
 
   it('refuses a non-boolean navigate value in a stored record', async () => {
