@@ -297,10 +297,19 @@ async function main() {
     const tarball = join(workdir, 'package.tgz')
     let downloaded = false
     if (typeof tarballUrl === 'string') {
-      const response = await fetch(tarballUrl, { headers: { 'cache-control': 'no-cache' } })
-      if (response.ok) {
+      // Ask for the bytes with a cache-busting query on the FIRST request, not only after a
+      // miss. A publish is visible in the version document before its blob has replicated to
+      // every edge, and an edge that fetched in that window can keep serving its 404 for the
+      // bare URL long afterwards (measured on 0.3.1: HEAD without a query 404, with one 200).
+      // The query cannot change WHICH artifact is served — integrity is verified below — so
+      // this only stops a stale negative cache from failing a release that is actually fine.
+      const bust = `${tarballUrl}${tarballUrl.includes('?') ? '&' : '?'}cachebust=${Date.now()}`
+      for (const url of [bust, tarballUrl]) {
+        const response = await fetch(url, { headers: { 'cache-control': 'no-cache' } })
+        if (!response.ok) continue
         writeFileSync(tarball, Buffer.from(await response.arrayBuffer()))
         downloaded = true
+        break
       }
     }
     check('the registry\'s tarball downloads', downloaded,
