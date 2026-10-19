@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1](https://github.com/9087/dsh-shortcut/compare/v0.3.0...v0.3.1) (2026-10-19)
+
+### Bug Fixes
+
+* send any-session shortcuts to the conversation that is open. ([0db5939](https://github.com/9087/dsh-shortcut/commit/0db5939d12020d1681836d8604972385fe6aa03e))
+
 ## [0.3.0](https://github.com/9087/dsh-shortcut/compare/v0.2.1...v0.3.0) (2026-10-19)
 
 ### Features
