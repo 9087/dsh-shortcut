@@ -19,8 +19,12 @@ export const STORE_VERSION = 2
 /** Largest accepted name length, after trimming. */
 export const NAME_MAX_LENGTH = 60
 
-/** Largest accepted text length, after trimming. */
-export const TEXT_MAX_LENGTH = 20_000
+/**
+ * The text has NO length cap, deliberately: the host's own reminder feature
+ * (`ctx.schedule`) accepts a prompt on exactly one rule — non-empty after trimming — and
+ * this plugin delivers the same kind of payload, so it enforces the same rule. A cap here
+ * would only refuse text the rest of the product accepts.
+ */
 
 /** Longest accepted label/path snapshot, after trimming. */
 export const LABEL_MAX_LENGTH = 400

@@ -14,7 +14,7 @@
  * @module dsh-shortcut/share
  */
 
-import { LABEL_MAX_LENGTH, NAME_MAX_LENGTH, TARGET_KINDS, TEXT_MAX_LENGTH } from './types.ts'
+import { LABEL_MAX_LENGTH, NAME_MAX_LENGTH, TARGET_KINDS } from './types.ts'
 import type {
   ShortcutDraft, ShortcutEntry, ShortcutError, ShortcutErrorCode, ShortcutTarget, ShortcutTargetKind,
 } from './types.ts'
@@ -127,7 +127,9 @@ export function validateDraft(
   const text = normalized(draft.text)
   const sessionId = normalized(draft.sessionId)
   if (name === undefined || text === undefined || sessionId === undefined) return { ok: false, problem: 'invalid-input' }
-  if (name.length > NAME_MAX_LENGTH || text.length > TEXT_MAX_LENGTH) return { ok: false, problem: 'invalid-input' }
+  // The name is capped because it is a label; the text is not, because the host's reminder
+  // feature accepts a prompt on the single rule "non-empty after trimming" (see types.ts).
+  if (name.length > NAME_MAX_LENGTH) return { ok: false, problem: 'invalid-input' }
   const target = normalizeTarget(draft.target, sessionId)
   if (target === undefined) return { ok: false, problem: 'invalid-input' }
   const key = nameKey(name)

@@ -135,9 +135,13 @@ describe('validateDraft', () => {
     expect(validateDraft([], draft({ text: '   ' }))).toEqual({ ok: false, problem: 'invalid-input' })
   })
 
-  it('refuses overlong values', () => {
+  it('refuses an overlong name but accepts text of any length', () => {
     expect(validateDraft([], draft({ name: 'n'.repeat(61) }))).toEqual({ ok: false, problem: 'invalid-input' })
-    expect(validateDraft([], draft({ text: 'x'.repeat(20_001) }))).toEqual({ ok: false, problem: 'invalid-input' })
+    // No text cap: the host's reminder prompt has none either, so refusing here would
+    // reject text the rest of the product accepts.
+    const long = validateDraft([], draft({ text: 'x'.repeat(20_001) }))
+    expect(long.ok).toBe(true)
+    expect(long.ok && long.draft.text.length).toBe(20_001)
   })
 
   it('refuses a name another record already owns, case-insensitively', () => {
