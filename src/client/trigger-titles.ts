@@ -71,10 +71,15 @@ function retitle(card: Element, t: Translate): string | undefined {
 
 /**
  * Attach the title bridge.
+ *
+ * Returns early without a `document`, like every other bridge in this plugin: the published
+ * bundle is exercised in a headless harness (and any SSR-ish host) where those globals simply
+ * do not exist, and a decoration must never be the reason a plugin fails to load.
  * @param options - the owner's translator.
  * @returns a disposer that stops observing and restores nothing (the cards unmount with the view).
  */
 export function attachTriggerTitles(options: TriggerTitleOptions): () => void {
+  if (typeof document === 'undefined') return () => {}
   const { t } = options
   let frame = 0
   let disposed = false
