@@ -302,6 +302,29 @@ describe('host naming', () => {
     expect(gen?.maxTokens ?? 0).toBeLessThanOrEqual(512)
     // Thinking would spend that budget and can leave the answer with no visible text at all.
     expect(gen?.reasoningEffort).toBe('off')
+    // The language is PINNED to the prompt's own, not left to the model's judgement.
+    expect(gen?.system).toContain('"zh"')
+  })
+
+  it('refuses a title written in the instructions\' language instead of the prompt\'s', async () => {
+    // A Chinese prompt answered in English is the exact drift the language rule guards.
+    const { call } = mount({ answer: 'Restart the dev service' })
+    const result = await call('suggestName', { text: '请帮我重启 dev 服务，然后确认健康检查通过' })
+    expect(result.value).toMatchObject({ source: 'rule', note: 'the model answered in a different language' })
+  })
+
+  it('accepts a title that keeps the prompt\'s script even when it mixes in identifiers', async () => {
+    const { call } = mount({ answer: '重启 dev 服务' })
+    const result = await call('suggestName', { text: '请帮我重启 dev 服务' })
+    expect(result.value).toEqual({ name: '重启 dev 服务', source: 'model' })
+  })
+
+  it('leaves a prompt without a CJK script alone', async () => {
+    const { call, modelCalls } = mount({ answer: 'Trim release checklist' })
+    const result = await call('suggestName', { text: 'tidy up the release checklist and drop the stale steps' })
+    // No tag to pin: the instruction asks the model to mirror the prompt instead.
+    expect(modelCalls[0]?.system).toContain('same language as the prompt')
+    expect(result.value).toEqual({ name: 'Trim release checklist', source: 'model' })
   })
 
   it('never reads reasoning as the answer', async () => {

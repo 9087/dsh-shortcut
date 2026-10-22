@@ -162,6 +162,91 @@ export function validateDraft(
  */
 const SUGGESTED_NAME_MAX = 40
 
+/** Script ranges that make the answer's language family decidable without a language tag. */
+const KANA = /[\u3040-\u30ff]/u
+const HANGUL = /[\u1100-\u11ff\uac00-\ud7af]/u
+const HAN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u
+const LATIN_LETTER = /[A-Za-z]/u
+
+/**
+ * How much of a text must be CJK before the text counts as a CJK-language text.
+ *
+ * Presence alone is wrong: "add a retry to the 微信 upload client" mentions one Chinese word
+ * and is still an English prompt, and pinning a Chinese title to it would be a misread. A
+ * Chinese prompt that borrows English tech words ("帮我 review 这个 PR") keeps a CJK share far
+ * above this line, so the ratio separates the two cases rather than a guess.
+ */
+const CJK_DOMINANCE = 0.2
+
+/** A single stray CJK character never makes a text CJK: two are the smallest real signal. */
+const CJK_MIN_CHARS = 2
+
+/** Count the letters of a text by family, ignoring digits, punctuation and whitespace. */
+function lettersOf(text: string): { cjk: number; latin: number } {
+  let cjk = 0
+  let latin = 0
+  for (const character of text) {
+    if (KANA.test(character) || HANGUL.test(character) || HAN.test(character)) cjk += 1
+    else if (LATIN_LETTER.test(character)) latin += 1
+  }
+  return { cjk, latin }
+}
+
+/**
+ * Whether text contains any Chinese/Japanese/Korean character.
+ * @param text - any text.
+ */
+export function hasCjk(text: string): boolean {
+  return KANA.test(text) || HANGUL.test(text) || HAN.test(text)
+}
+
+/**
+ * Whether a text is WRITTEN IN a Chinese/Japanese/Korean language, rather than merely
+ * mentioning one. See {@link CJK_DOMINANCE} for why presence is not enough.
+ * @param text - the prompt.
+ */
+export function isCjkDominant(text: string): boolean {
+  const { cjk, latin } = lettersOf(text)
+  if (cjk < CJK_MIN_CHARS) return false
+  return cjk / (cjk + latin) >= CJK_DOMINANCE
+}
+
+/**
+ * The language a prompt is written in, when its script makes that certain.
+ *
+ * This is the tag the naming call pins the answer to. Kana and Hangul are checked first
+ * because Japanese and Korean prose contain Han characters too, and a Han-only text is
+ * Chinese in practice.
+ * @param text - the prompt.
+ * @returns a BCP-47 tag, or undefined when the text is not a CJK text (or not clearly one):
+ *   there the model is told to mirror the prompt instead.
+ */
+export function languageTagOf(text: string): string | undefined {
+  if (!isCjkDominant(text)) return undefined
+  if (KANA.test(text)) return 'ja'
+  if (HANGUL.test(text)) return 'ko'
+  return 'zh'
+}
+
+/**
+ * Whether an answer was written in the wrong language family for its prompt.
+ *
+ * Only the CJK axis is checked, and that is deliberate: it is the axis where an answer can
+ * come back ENTIRELY in the instruction's language (a Chinese prompt titled in English),
+ * and where the check is a character-class test with no false positives. A title that keeps
+ * the prompt's script stays legal even when it mixes in identifiers ("重启 API server"), and
+ * a mixed prompt whose dominant language is Latin is not second-guessed at all.
+ * @param prompt - the prompt that was named.
+ * @param answer - the model's answer.
+ * @returns true when the answer's language family contradicts the prompt's.
+ */
+export function languageMismatch(prompt: string, answer: string): boolean {
+  const { cjk } = lettersOf(prompt)
+  if (cjk === 0) return hasCjk(answer)
+  if (!isCjkDominant(prompt)) return false
+  return !hasCjk(answer)
+}
+
 /**
  * The name a prompt suggests: its first non-empty line, stripped of list/heading markers and
  * surrounding quotes, whitespace-collapsed, and cut on a word boundary.

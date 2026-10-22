@@ -1,6 +1,9 @@
 /** Draft validation: the rules the dialog's disabled state and the host share. */
 import { describe, expect, it } from 'vitest'
-import { cleanName, nameFromTitle, nameKey, normalizeTarget, suggestName, validateDraft } from '../src/share.ts'
+import {
+  cleanName, hasCjk, isCjkDominant, languageMismatch, languageTagOf, nameFromTitle, nameKey, normalizeTarget,
+  suggestName, validateDraft,
+} from '../src/share.ts'
 import type { ShortcutEntry, ShortcutTarget } from '../src/types.ts'
 
 /** One stored record, filled enough for the rules under test. */
@@ -241,5 +244,52 @@ describe('nameFromTitle', () => {
   it('never de-duplicates against the record being edited', () => {
     const entries = [entry({ id: 'a', name: '重启服务' })]
     expect(nameFromTitle('重启服务', entries, 'a')).toBe('重启服务')
+  })
+})
+
+describe('language constraint', () => {
+  it('recognises the CJK scripts and nothing else', () => {
+    expect(hasCjk('请重启服务')).toBe(true)
+    expect(hasCjk('再起動して')).toBe(true)
+    expect(hasCjk('재시작')).toBe(true)
+    expect(hasCjk('restart dev')).toBe(false)
+    expect(hasCjk('1234 !!!')).toBe(false)
+  })
+
+  it('decides the family by the DOMINANT script, not by a stray word', () => {
+    // A Chinese prompt that borrows English tech words is still Chinese.
+    expect(isCjkDominant('请重启 dev 服务')).toBe(true)
+    expect(isCjkDominant('帮我 review 这个 PR，看看有没有内存泄漏')).toBe(true)
+    // An English prompt that mentions one Chinese name is still English.
+    expect(isCjkDominant('add a retry to the 微信 upload client')).toBe(false)
+    // One CJK character is never a language signal.
+    expect(isCjkDominant('restart 啊')).toBe(false)
+  })
+
+  it('pins the language tag only for a CJK text', () => {
+    expect(languageTagOf('请重启 dev 服务')).toBe('zh')
+    // Kana wins over Han: Japanese prose contains Han characters too.
+    expect(languageTagOf('再起動して、確認する')).toBe('ja')
+    expect(languageTagOf('재시작하고 확인')).toBe('ko')
+    // Latin/Cyrillic do not decide a language: the model is told to mirror instead.
+    expect(languageTagOf('restart the dev service')).toBeUndefined()
+    expect(languageTagOf('перезапустить сервис')).toBeUndefined()
+    // A Latin-dominant prompt is not pinned to Chinese by a borrowed word.
+    expect(languageTagOf('add a retry to the 微信 upload client')).toBeUndefined()
+  })
+
+  it('treats an answer in the other family as a mismatch', () => {
+    // A Chinese prompt titled in the instructions' own language is the failure this guards.
+    expect(languageMismatch('请重启 dev 服务', 'Restart the dev service')).toBe(true)
+    expect(languageMismatch('restart the dev service', '重启 dev 服务')).toBe(true)
+  })
+
+  it('allows mixed titles, which still carry the prompt\'s own script', () => {
+    expect(languageMismatch('请重启 dev 服务', '重启 dev 服务')).toBe(false)
+    expect(languageMismatch('restart the dev service', 'Restart dev service')).toBe(false)
+  })
+
+  it('does not judge a Latin-dominant prompt that merely mentions a CJK name', () => {
+    expect(languageMismatch('add a retry to the 微信 upload client', 'Add upload retry')).toBe(false)
   })
 })

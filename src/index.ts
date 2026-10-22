@@ -27,7 +27,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { nameFromTitle, suggestName } from './share.ts'
+import { languageMismatch, languageTagOf, nameFromTitle, suggestName } from './share.ts'
 import { defaultShortcutDir, ShortcutStore, StoreFailure } from './store.ts'
 import { SHORTCUT_CHANNEL } from './types.ts'
 import type { ShortcutDraft, ShortcutEdit, ShortcutErrorCode, ShortcutTarget } from './types.ts'
@@ -175,16 +175,52 @@ const NAME_CALL_TIMEOUT_MS = 12_000
 const NAME_MAX_TOKENS = 256
 
 /**
- * The instruction a model gets when naming a prompt. Short on purpose: the answer is a label,
- * so one line, its own language, and no chrome (quotes, labels, trailing punctuation) — the
- * host cleans whatever comes back anyway.
+ * The instruction a model gets when naming a prompt.
+ *
+ * The LENGTH rule alone produced labels that were short but not names: a model copying the
+ * prompt's opening words kept its politeness and filler ("请帮我重启…", "能不能…"), which reads
+ * like a sentence, not a menu item. So the prompt states the REGISTER explicitly — a menu
+ * label or commit subject, verb-object, no address to anyone — and shows two examples per
+ * language, because an example fixes a register far more reliably than an adjective does.
+ * It also names what must survive verbatim (service names, paths, flags): a translated
+ * identifier no longer matches anything the reader will see.
+ *
+ * The language is PINNED, not merely requested. "Write in the prompt's language" is a
+ * judgement call a model loses to its own English instructions, so the host detects the
+ * prompt's language where its script decides it and hands the model a concrete tag to follow
+ * (the tactic the host's own shell-note call uses with a locale tag) — and
+ * {@link languageMismatch} then refuses an answer that still came back in the wrong family.
+ * @param tag - BCP-47 tag of the prompt's language, when the host could tell.
  */
-const NAME_SYSTEM_PROMPT = [
-  'You name saved prompts for a shortcut menu.',
-  'Reply with the title only: one line, no quotes, no explanation, no trailing punctuation.',
-  'Keep the language of the prompt.',
-  'Use at most 12 characters for Chinese/Japanese/Korean, and at most 6 words otherwise.',
-].join(' ')
+function nameSystemPrompt(tag: string | undefined): string {
+  const language = tag === undefined
+    ? '- LANGUAGE: write the title in the same language as the prompt. These instructions are in\n  English, but the title must NOT be: mirror the prompt exactly.'
+    : `- LANGUAGE: write the title in the prompt's language — BCP-47 tag "${tag}". These\n  instructions are in English and must not leak into the answer.`
+  return [
+    'You title saved prompts for a shortcut menu.',
+    'The user sends one prompt. Answer with a short, formal title for it — the kind of label a',
+    'menu item or a git commit subject line uses.',
+    '',
+    'Rules:',
+    '- Reply with the title ONLY: one line, no quotation marks, no markdown, no code fences,',
+    '  no emoji, no "Title:" prefix, no explanation, no trailing punctuation.',
+    '- Write a noun phrase or a verb-object phrase naming what the prompt does. Not a sentence:',
+    '  no greeting, no politeness or filler words, no first person, no "please", no "this task",',
+    '  no "the user wants".',
+    '- Keep the prompt\'s own names exactly as written: services, files, paths, flags,',
+    '  identifiers, versions. Never translate them.',
+    language,
+    '- At most 14 characters for Chinese/Japanese/Korean; at most 6 words otherwise. Shorter is',
+    '  better, but never so short that it stops saying what the prompt does.',
+    '',
+    'Examples (Chinese):',
+    '  "请帮我重启一下 dev 服务，然后确认健康检查通过" -> 重启 dev 服务',
+    '  "这个 PR 的日志太吵了，能不能去掉那些调试输出" -> 精简 PR 调试日志',
+    'Examples (English):',
+    '  "please add a retry to the upload client when the network drops" -> Add upload retry',
+    '  "tidy up the release checklist and drop the stale steps" -> Trim release checklist',
+  ].join('\n')
+}
 
 /**
  * Why a model naming attempt did not produce a name. `note` is shown to the reader as the
@@ -277,7 +313,7 @@ async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Pro
       for await (const chunk of llm.stream({
         provider: selection.provider,
         model: selection.model,
-        system: NAME_SYSTEM_PROMPT,
+        system: nameSystemPrompt(languageTagOf(text)),
         messages: [{ role: 'user', content: [{ type: 'text', text }] }],
         temperature: 0.2,
         maxTokens: NAME_MAX_TOKENS,
@@ -293,6 +329,13 @@ async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Pro
           ctx.logger.warn(`dsh-shortcut: naming with the model failed: ${failure}`)
           return { answer: '', note: failure }
         }
+      }
+      // The instruction pins the language, but a model that ignores it must not hand the
+      // reader a title in the wrong language: that is a refusal, not a name.
+      if (answer.trim().length > 0 && languageMismatch(text, answer)) {
+        const note = 'the model answered in a different language'
+        ctx.logger.warn(`dsh-shortcut: naming with the model failed: ${note}`)
+        return { answer: '', note }
       }
       return answer.trim().length === 0
         ? { answer: '', note: 'the model returned no text' }
