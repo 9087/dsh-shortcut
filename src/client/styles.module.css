@@ -308,6 +308,20 @@
   line-height: 18px;
 }
 
+/* The name field and its inline action share one row: the input takes the space, the action
+   keeps its natural width, so the field never shrinks below a usable size. */
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nameInput {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .textarea {
   box-sizing: border-box;
   width: 100%;

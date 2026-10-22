@@ -1,6 +1,6 @@
 /** Draft validation: the rules the dialog's disabled state and the host share. */
 import { describe, expect, it } from 'vitest'
-import { nameKey, normalizeTarget, validateDraft } from '../src/share.ts'
+import { cleanName, nameFromTitle, nameKey, normalizeTarget, suggestName, validateDraft } from '../src/share.ts'
 import type { ShortcutEntry, ShortcutTarget } from '../src/types.ts'
 
 /** One stored record, filled enough for the rules under test. */
@@ -12,6 +12,7 @@ function entry(overrides: Partial<ShortcutEntry>): ShortcutEntry {
     target: { kind: 'main' },
     text: '重启',
     navigate: true,
+    anySession: false,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -159,5 +160,86 @@ describe('validateDraft', () => {
   it('still refuses another record\'s name while editing', () => {
     const entries = [entry({ id: 'a', name: 'Alpha' }), entry({ id: 'b', name: 'Beta' })]
     expect(validateDraft(entries, draft({ name: 'beta' }), 'a')).toEqual({ ok: false, problem: 'name-taken' })
+  })
+})
+
+describe('suggestName', () => {
+  it('uses the first non-empty line, whitespace collapsed', () => {
+    expect(suggestName('重启服务：请重启 dev 服务', [])).toBe('重启服务：请重启 dev 服务')
+    expect(suggestName('   \n\n  重启服务   马上  \n第二行不该用 ', [])).toBe('重启服务 马上')
+  })
+
+  it('drops the markers a prompt often starts with', () => {
+    expect(suggestName('## 部署到测试环境', [])).toBe('部署到测试环境')
+    expect(suggestName('- 整理本周发布说明', [])).toBe('整理本周发布说明')
+    expect(suggestName('"重启服务"', [])).toBe('重启服务')
+    expect(suggestName('# \n', [])).toBe('')
+  })
+
+  it('answers nothing for a blank prompt, so the action stays inert', () => {
+    expect(suggestName('', [])).toBe('')
+    expect(suggestName('   \n\t ', [])).toBe('')
+  })
+
+  it('cuts a long first line on a word boundary, inside the name cap', () => {
+    const suggested = suggestName('deploy the service to the staging cluster and verify it', [])
+    expect(suggested.length).toBeLessThanOrEqual(40)
+    expect(suggested).toBe('deploy the service to the staging')
+  })
+
+  it('de-duplicates against the records that already exist', () => {
+    const entries = [entry({ id: 'a', name: '重启服务' })]
+    expect(suggestName('重启服务，请重启 dev 服务', entries)).toBe('重启服务，请重启 dev 服务')
+    expect(suggestName('重启服务', entries)).toBe('重启服务 2')
+    expect(suggestName('重启服务', [entry({ id: 'a', name: '重启服务' }), entry({ id: 'b', name: '重启服务 2' })]))
+      .toBe('重启服务 3')
+  })
+
+  it('never de-duplicates against the record being edited', () => {
+    const entries = [entry({ id: 'a', name: '重启服务' })]
+    expect(suggestName('重启服务', entries, 'a')).toBe('重启服务')
+  })
+
+  it('keeps a long de-duplicated name inside the cap', () => {
+    const base = 'deploy the service to the staging cluster'
+    const firstCut = suggestName(base, [])
+    const entries = [entry({ id: 'a', name: firstCut })]
+    const suggested = suggestName(base, entries)
+    expect(suggested.length).toBeLessThanOrEqual(60)
+    expect(suggested.endsWith(' 2')).toBe(true)
+  })
+})
+
+describe('cleanName', () => {
+  it('strips the chrome a model wraps a title in', () => {
+    expect(cleanName('"重启服务。"')).toBe('重启服务')
+    expect(cleanName('标题：部署到测试环境')).toBe('部署到测试环境')
+    expect(cleanName('Title: Deploy to staging.')).toBe('Deploy to staging')
+    expect(cleanName('**生成发布检查单**')).toBe('生成发布检查单')
+  })
+
+  it('keeps only the first non-empty line, so a chatty answer cannot fill the field', () => {
+    expect(cleanName('\n\n重启服务\n这是因为……')).toBe('重启服务')
+  })
+
+  it('answers nothing when the answer has no words in it', () => {
+    expect(cleanName('')).toBe('')
+    expect(cleanName('  "。"  ')).toBe('')
+  })
+
+  it('stays inside the name cap', () => {
+    expect(cleanName('n'.repeat(200)).length).toBeLessThanOrEqual(60)
+  })
+})
+
+describe('nameFromTitle', () => {
+  it('cleans the title and makes it unique against the other records', () => {
+    const entries = [entry({ id: 'a', name: '重启服务' })]
+    expect(nameFromTitle('「重启服务」。', entries)).toBe('重启服务 2')
+  })
+
+  it('never de-duplicates against the record being edited', () => {
+    const entries = [entry({ id: 'a', name: '重启服务' })]
+    expect(nameFromTitle('重启服务', entries, 'a')).toBe('重启服务')
   })
 })

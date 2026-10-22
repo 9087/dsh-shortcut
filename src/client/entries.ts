@@ -140,6 +140,21 @@ export class EntriesStore {
     return api.send(id, shown)
   }
 
+  /**
+   * Ask the host to name one prompt (model first, deterministic rule as the fallback).
+   * @param text - the prompt to name.
+   * @param excludeId - the record being edited.
+   * @returns the name, which rule produced it, and why the model was skipped when it was.
+   */
+  async suggestName(
+    text: string,
+    excludeId?: string | undefined,
+  ): Promise<{ name: string; source: 'model' | 'rule'; note?: string }> {
+    const api = this.api
+    if (api === undefined) throw new ShortcutFailure('store-unavailable', 'the store is not connected')
+    return api.suggestName(text, excludeId)
+  }
+
   /** Find one record in the current list. */
   entryOf(id: string): ShortcutEntry | undefined {
     return this.state.entries.find(entry => entry.id === id)

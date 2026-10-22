@@ -207,4 +207,27 @@ export class ShortcutApi {
       anySession: entry.anySession === true,
     }
   }
+
+  /**
+   * Ask the host to name one prompt — with the default model, or with the deterministic rule
+   * when the host has no usable model. The host owns both rules, so the answer is always a
+   * name the dialog could save as-is.
+   * @param text - the prompt to name.
+   * @param excludeId - the record being edited, so the answer never de-duplicates against it.
+   * @returns the name, which rule produced it, and why the model was skipped when it was.
+   */
+  async suggestName(
+    text: string,
+    excludeId?: string | undefined,
+  ): Promise<{ name: string; source: 'model' | 'rule'; note?: string }> {
+    const payload = excludeId === undefined ? { text } : { text, excludeId }
+    const value = recordOf(await this.call('suggestName', payload))
+    const name = value?.name
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new ShortcutFailure('invalid-input', 'the host could not name this prompt')
+    }
+    const source = value?.source === 'model' ? 'model' : 'rule'
+    const note = value?.note
+    return typeof note === 'string' && note.length > 0 ? { name, source, note } : { name, source }
+  }
 }

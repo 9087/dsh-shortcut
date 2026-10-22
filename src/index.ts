@@ -27,6 +27,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import { nameFromTitle, suggestName } from './share.ts'
 import { defaultShortcutDir, ShortcutStore, StoreFailure } from './store.ts'
 import { SHORTCUT_CHANNEL } from './types.ts'
 import type { ShortcutDraft, ShortcutEdit, ShortcutErrorCode, ShortcutTarget } from './types.ts'
@@ -117,6 +118,206 @@ interface SubagentRuntimeSurface {
   prompt(request: SubagentPromptRequestLike, signal: AbortSignal): Promise<{ messageId: string }>
 }
 
+/** One chunk of a streamed model answer, narrowed to what naming reads. */
+interface StreamChunkLike {
+  readonly type: string
+  readonly text?: string
+  /** Present on `block-end`: the finished block, which may carry text when no deltas came. */
+  readonly block?: unknown
+  /** Present on `finish`: how the call ended, errors included. */
+  readonly reason?: unknown
+  /** Alternate text carriers some adapters use instead of `text`. */
+  readonly delta?: unknown
+  readonly content?: unknown
+}
+
+/** A one-shot model call, as the host runtime takes it. */
+interface GenerateOptionsLike {
+  readonly provider: string
+  readonly model: string
+  readonly messages: readonly {
+    readonly role: 'user'
+    readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+  }[]
+  readonly system?: string
+  readonly temperature?: number
+  readonly maxTokens?: number
+  readonly stop?: readonly string[]
+  /**
+   * The adapter-owned reasoning effort. Naming asks for `'off'`: this host runs `high`, and a
+   * thinking model spends a small token budget on deliberation and can answer with NO visible
+   * text at all (the same reason the host's own session-title call turns it off).
+   */
+  readonly reasoningEffort?: string
+  readonly signal?: AbortSignal
+}
+
+/** The one verb this plugin uses from the host model runtime. */
+interface LlmRuntimeSurface {
+  stream(options: GenerateOptionsLike): AsyncIterable<StreamChunkLike>
+}
+
+/** The host's default model selection, read as plain strings. */
+interface DefaultModelSurface {
+  currentSelection(): { provider: string; model: string }
+}
+
+/**
+ * How long the naming call may take before the deterministic rule answers instead. A name is
+ * a detail of filling in a dialog: the reader must not wait on a slow model for it.
+ */
+const NAME_CALL_TIMEOUT_MS = 12_000
+
+/**
+ * How many tokens the answer may take. Small, but not tight: a model that emits a stray line
+ * before the title still has room to produce the title, and the cap keeps this call cheap.
+ */
+const NAME_MAX_TOKENS = 256
+
+/**
+ * The instruction a model gets when naming a prompt. Short on purpose: the answer is a label,
+ * so one line, its own language, and no chrome (quotes, labels, trailing punctuation) — the
+ * host cleans whatever comes back anyway.
+ */
+const NAME_SYSTEM_PROMPT = [
+  'You name saved prompts for a shortcut menu.',
+  'Reply with the title only: one line, no quotes, no explanation, no trailing punctuation.',
+  'Keep the language of the prompt.',
+  'Use at most 12 characters for Chinese/Japanese/Korean, and at most 6 words otherwise.',
+].join(' ')
+
+/**
+ * Why a model naming attempt did not produce a name. `note` is shown to the reader as the
+ * reason the button fell back, so "the model never ran" is never a silent mystery.
+ */
+interface NameAttempt {
+  readonly answer: string
+  readonly note?: string
+}
+
+/** The text a streamed block carries, when the adapter sends whole blocks instead of deltas. */
+function blockTextOf(chunk: StreamChunkLike): string | undefined {
+  const block = chunk.block
+  if (typeof block !== 'object' || block === null) return undefined
+  const record = block as { type?: unknown; text?: unknown }
+  return record.type === 'text' && typeof record.text === 'string' ? record.text : undefined
+}
+
+/**
+ * The VISIBLE text one chunk carries, whatever field this host's adapter put it in.
+ *
+ * Only visible text: `reasoning-delta` carries the same `text` field as `text-delta`, so a
+ * reader that ignores the type concatenates the model's own thinking into the answer — with
+ * effort `high` that deliberation is most of what the model produces, and it would be cleaned
+ * into a "name" that is really a sentence of reasoning. The tolerated shapes (`delta.text`,
+ * `content.text`, a bare string) cost nothing and save a silent empty answer on a host that
+ * spells the chunk differently; this is the single place that reads them.
+ * @param chunk - one stream chunk.
+ * @returns its visible text, or '' when it carries none.
+ */
+function visibleTextOf(chunk: StreamChunkLike): string {
+  if (chunk.type === 'reasoning-delta') return ''
+  if (typeof chunk.text === 'string') return chunk.text
+  const delta = chunk.delta as { text?: unknown } | undefined
+  if (typeof delta === 'object' && delta !== null && typeof delta.text === 'string') return delta.text
+  const content = chunk.content as { text?: unknown } | undefined
+  if (typeof content === 'object' && content !== null && typeof content.text === 'string') return content.text
+  return chunk.type === 'block-end' ? blockTextOf(chunk) ?? '' : ''
+}
+
+/** The failure message a `finish` chunk reports, when it reports one. */
+function finishFailureOf(chunk: StreamChunkLike): string | undefined {
+  const reason = chunk.reason
+  if (typeof reason !== 'object' || reason === null) return undefined
+  const record = reason as { kind?: unknown; failure?: unknown }
+  if (record.kind !== 'error') return undefined
+  const failure = record.failure
+  if (typeof failure === 'object' && failure !== null) {
+    const message = (failure as { message?: unknown }).message
+    if (typeof message === 'string' && message.length > 0) return message
+  }
+  return 'the model call reported an error'
+}
+
+/**
+ * Ask the host's default model for a name.
+ *
+ * Deliberately optional: a profile without a model runtime, without a configured model, or
+ * with a failing provider must still get a name, so this answers the reason instead of
+ * failing — the caller falls back to the deterministic rule and tells the reader why.
+ * @param ctx - host context.
+ * @param text - the prompt to name.
+ * @param signal - caller cancellation.
+ * @returns the model's answer and, when there is none, the note that explains it.
+ */
+async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Promise<NameAttempt> {
+  const llm = ctx.get('llm') as LlmRuntimeSurface | undefined
+  if (llm === undefined || typeof llm.stream !== 'function') {
+    return { answer: '', note: 'the host has no model runtime' }
+  }
+  const selection = (ctx.get('agentDefaultModel') as DefaultModelSurface | undefined)?.currentSelection?.()
+  if (selection === undefined || selection.provider.length === 0 || selection.model.length === 0) {
+    return { answer: '', note: 'the host has no default model selected' }
+  }
+  // Bound the call: a slow or hung provider must not hold the dialog's button forever. The
+  // deadline RACES the stream rather than only aborting it, because one adapter ignoring the
+  // signal would otherwise keep the button spinning until the model itself gave up.
+  const controller = new AbortController()
+  let timedOut = false
+  const stopExternal = (): void => { controller.abort() }
+  if (signal.aborted) return { answer: '', note: 'cancelled' }
+  signal.addEventListener('abort', stopExternal, { once: true })
+  const deadline = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, NAME_CALL_TIMEOUT_MS)
+  try {
+    const consume = (async (): Promise<NameAttempt> => {
+      let answer = ''
+      for await (const chunk of llm.stream({
+        provider: selection.provider,
+        model: selection.model,
+        system: NAME_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: [{ type: 'text', text }] }],
+        temperature: 0.2,
+        maxTokens: NAME_MAX_TOKENS,
+        // A title is one line: reasoning would spend the budget and can leave no visible text.
+        reasoningEffort: 'off',
+        signal: controller.signal,
+      })) {
+        answer += visibleTextOf(chunk)
+        // A failed call is a `finish` EVENT, not a thrown error: without this the caller would
+        // read it as an empty answer and the reader would never learn the model was refused.
+        const failure = chunk.type === 'finish' ? finishFailureOf(chunk) : undefined
+        if (failure !== undefined) {
+          ctx.logger.warn(`dsh-shortcut: naming with the model failed: ${failure}`)
+          return { answer: '', note: failure }
+        }
+      }
+      return answer.trim().length === 0
+        ? { answer: '', note: 'the model returned no text' }
+        : { answer }
+    })()
+    const stopped = new Promise<NameAttempt>((resolve) => {
+      controller.signal.addEventListener('abort', () => {
+        resolve({ answer: '', note: timedOut ? `no answer within ${String(NAME_CALL_TIMEOUT_MS / 1000)}s` : 'cancelled' })
+      }, { once: true })
+    })
+    const attempt = await Promise.race([consume, stopped])
+    if (attempt.answer.length > 0) {
+      ctx.logger.info(`dsh-shortcut: named a prompt with ${selection.provider}/${selection.model} (${attempt.answer.trim().length} chars)`)
+    }
+    return attempt
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    ctx.logger.warn(`dsh-shortcut: naming with the model failed: ${message}`)
+    return { answer: '', note: message }
+  } finally {
+    clearTimeout(deadline)
+    signal.removeEventListener('abort', stopExternal)
+  }
+}
+
 /** Build one failure result. */
 function fail(code: ShortcutErrorCode, message: string): HandlerResult {
   return { ok: false, error: { code, message, details: {} } }
@@ -170,6 +371,15 @@ function editOf(payload: unknown): ShortcutEdit | undefined {
 function idOf(payload: unknown): string | undefined {
   const id = objectOf(payload)?.id
   return typeof id === 'string' && id.length > 0 ? id : undefined
+}
+
+/** Read the prompt (and optional record id) out of a naming request. */
+function namingOf(payload: unknown): { text: string; excludeId?: string } | undefined {
+  const body = objectOf(payload)
+  const text = body?.text
+  if (typeof text !== 'string' || text.trim().length === 0) return undefined
+  const excludeId = body?.excludeId
+  return typeof excludeId === 'string' && excludeId.length > 0 ? { text, excludeId } : { text }
 }
 
 /**
@@ -238,6 +448,29 @@ function sendFailure(error: unknown): { code: ShortcutErrorCode; message: string
  */
 export function apply(ctx: Context): void {
   const store = new ShortcutStore(defaultShortcutDir())
+
+  /**
+   * Name one prompt: the default model first, the deterministic rule when it cannot answer.
+   *
+   * Both halves run the same uniqueness and length rules, so the answer is always a name the
+   * dialog could save as-is — the model only decides WHAT it is called, never whether it is valid.
+   * @param text - the prompt to name.
+   * @param excludeId - the record being edited, so it never de-duplicates against itself.
+   * @param signal - caller cancellation.
+   * @returns the name plus which rule produced it.
+   */
+  const suggestNameFor = async (
+    text: string,
+    excludeId: string | undefined,
+    signal: AbortSignal,
+  ): Promise<{ name: string; source: 'model' | 'rule'; note?: string }> => {
+    const entries = await store.list()
+    const attempt = await modelNameOf(ctx, text, signal)
+    const fromModel = nameFromTitle(attempt.answer, entries, excludeId)
+    if (fromModel.length > 0) return { name: fromModel, source: 'model' }
+    const fallback = { name: suggestName(text, entries, excludeId), source: 'rule' as const }
+    return attempt.note === undefined ? fallback : { ...fallback, note: attempt.note }
+  }
 
   /**
    * Deliver one record's text to its addressed agent.
@@ -350,6 +583,11 @@ export function apply(ctx: Context): void {
           const id = idOf(payload)
           if (id === undefined) return fail('invalid-input', 'send needs an id')
           return await deliver(id, signal, shownConversationOf(payload))
+        }
+        case 'suggestName': {
+          const naming = namingOf(payload)
+          if (naming === undefined) return fail('invalid-input', 'suggestName needs a non-empty text')
+          return value(await suggestNameFor(naming.text, naming.excludeId, signal))
         }
         default:
           return fail('invalid-input', `unknown endpoint ${JSON.stringify(endpoint)}`)

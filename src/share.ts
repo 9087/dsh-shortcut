@@ -156,6 +156,148 @@ export function validateDraft(
   }
 }
 
+/**
+ * Longest base a generated name may take, leaving room for a de-duplication suffix inside
+ * {@link NAME_MAX_LENGTH}.
+ */
+const SUGGESTED_NAME_MAX = 40
+
+/**
+ * The name a prompt suggests: its first non-empty line, stripped of list/heading markers and
+ * surrounding quotes, whitespace-collapsed, and cut on a word boundary.
+ * @param text - the prompt.
+ * @returns the base name, possibly empty for a blank prompt.
+ */
+function baseNameOf(text: string): string {
+  const firstLine = text.split(/\r?\n/u).map(line => line.trim()).find(line => line.length > 0) ?? ''
+  const collapsed = firstLine.replace(/\s+/gu, ' ').trim()
+  // A prompt often starts with list or heading markers ("- 重启服务", "## 部署"); those are
+  // punctuation about the prompt's shape, not part of the name it suggests. A quoted prompt
+  // is stripped at both ends, or the closing quote would survive into the name.
+  const stripped = collapsed
+    .replace(/^[#>*\-•·"'`“”‘’\s]+/u, '')
+    .replace(/["'`“”‘’]+$/u, '')
+    .trim()
+  // A line that was nothing BUT markers ("- ", "##") names nothing; there are no words in it.
+  if (stripped.length === 0) return ''
+  const source = stripped
+  if (source.length <= SUGGESTED_NAME_MAX) return source
+  // Cut on a word boundary when there is one far enough in, so a name does not end mid-word.
+  const cut = source.slice(0, SUGGESTED_NAME_MAX)
+  const lastSpace = cut.search(/\s\S*$/u)
+  return (lastSpace > 10 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
+/** Wrappers a title may come dressed in, each with the closer that must pair with it. */
+const TITLE_WRAPPERS: readonly (readonly [string, string])[] = [
+  ['「', '」'], ['『', '』'], ['（', '）'], ['(', ')'], ['【', '】'], ['[', ']'], ['《', '》'],
+  ['"', '"'], ["'", "'"], ['`', '`'], ['“', '”'], ['‘', '’'],
+]
+
+/** Leading list/heading markers: punctuation about the answer's shape, not the name. */
+const LEADING_MARKERS = /^(?:[#>\-*•·]+\s*)+/u
+
+/** Trailing emphasis markers, which no name ends with on purpose. */
+const TRAILING_MARKERS = /[*_~]+$/u
+
+/** Sentence punctuation a title carries but a NAME does not need. */
+const TRAILING_PUNCTUATION = /[。．.，,；;：:！!？?、]+$/u
+
+/**
+ * Clean a title PROPOSED BY SOMETHING ELSE (the model) into a name.
+ *
+ * A model answer is untrusted text: it is asked for one line, but may still carry list
+ * markers, markdown emphasis, a `标题：` / `Title:` label, quotes, or a trailing full stop.
+ * Only the first line is kept, so a chatty reply cannot smuggle a paragraph into a label
+ * field, and wrappers are removed only in PAIRS — a name that legitimately ends in `）`
+ * (e.g. "重启服务（已改名）") is left alone.
+ * @param raw - the proposed title.
+ * @returns the cleaned name, possibly empty.
+ */
+export function cleanName(raw: string): string {
+  const firstLine = raw.split(/\r?\n/u).map(line => line.trim()).find(line => line.length > 0) ?? ''
+  let text = firstLine.replace(/\s+/gu, ' ').trim()
+  // A few passes settle nesting ("**「重启服务」**。"): each strip can expose another.
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = text
+    text = text
+      .replace(/^(?:标题|title)\s*[:：]\s*/iu, '')
+      .replace(LEADING_MARKERS, '')
+      .replace(TRAILING_MARKERS, '')
+      .replace(TRAILING_PUNCTUATION, '')
+      .trim()
+    for (const [open, close] of TITLE_WRAPPERS) {
+      if (text.length > open.length + close.length && text.startsWith(open) && text.endsWith(close)) {
+        text = text.slice(open.length, text.length - close.length).trim()
+      }
+    }
+    text = text.replace(TRAILING_PUNCTUATION, '').trim()
+    if (text === before) break
+  }
+  return text.length > NAME_MAX_LENGTH ? text.slice(0, NAME_MAX_LENGTH).trim() : text
+}
+
+/**
+ * Make a name unique against every other record, as the name rule requires.
+ * @param base - the proposed name, already cleaned.
+ * @param entries - every existing record.
+ * @param excludeId - the record being edited, so it never de-duplicates against itself.
+ * @returns the usable name, within {@link NAME_MAX_LENGTH}, or an empty string for an empty base.
+ */
+export function uniqueName(
+  base: string,
+  entries: readonly ShortcutEntry[],
+  excludeId?: string | undefined,
+): string {
+  if (base.length === 0) return ''
+  const taken = new Set(
+    entries.filter(entry => excludeId === undefined || entry.id !== excludeId).map(entry => nameKey(entry.name)),
+  )
+  if (!taken.has(nameKey(base))) return base
+  for (let index = 2; index < 1000; index += 1) {
+    const suffix = ` ${index}`
+    const room = NAME_MAX_LENGTH - suffix.length
+    const candidate = `${base.slice(0, room).trim()}${suffix}`
+    if (!taken.has(nameKey(candidate))) return candidate
+  }
+  return base.slice(0, NAME_MAX_LENGTH)
+}
+
+/**
+ * Turn a model-proposed title into a usable name: clean it, then make it unique.
+ * @param title - the model's answer.
+ * @param entries - every existing record.
+ * @param excludeId - the record being edited.
+ * @returns the name, or an empty string when the answer had no words in it.
+ */
+export function nameFromTitle(
+  title: string,
+  entries: readonly ShortcutEntry[],
+  excludeId?: string | undefined,
+): string {
+  return uniqueName(cleanName(title), entries, excludeId)
+}
+
+/**
+ * Suggest a name for a record from its prompt with the DETERMINISTIC rule.
+ *
+ * This is what the dialog falls back to when the model is unavailable or its answer is
+ * useless, so the result must be immediately savable: trimmed, unique against every other
+ * record (case-insensitively, as the name rule is), and within {@link NAME_MAX_LENGTH}. A
+ * collision appends ` 2`, ` 3` … rather than answering a taken name the dialog would refuse.
+ * @param text - the prompt to name.
+ * @param entries - every existing record, for the uniqueness check.
+ * @param excludeId - the record being edited, so it never de-duplicates against itself.
+ * @returns the suggestion, or an empty string when the prompt has no words in it.
+ */
+export function suggestName(
+  text: string,
+  entries: readonly ShortcutEntry[],
+  excludeId?: string | undefined,
+): string {
+  return uniqueName(baseNameOf(text), entries, excludeId)
+}
+
 /** Build the error detail the host puts on the wire. */
 export function errorOf(code: ShortcutErrorCode, message: string): ShortcutError {
   return { code, message }

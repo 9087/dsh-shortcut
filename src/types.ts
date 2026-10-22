@@ -172,6 +172,17 @@ export type ShortcutValue =
   | { entry: ShortcutEntry }
   | { removed: true }
   | { accepted: true }
+  | {
+      /** A name for the given prompt, already unique against the stored records. */
+      name: string
+      /** Where it came from: the model, or the deterministic rule when the model was unusable. */
+      source: 'model' | 'rule'
+      /**
+       * Why the model produced nothing, when it was tried and did not answer. The dialog shows
+       * it as the reason for the fallback, so a silent degrade cannot look like a bug.
+       */
+      note?: string
+    }
 
 /** List request: no arguments. */
 export interface ListRequest { readonly kind: 'list' }
@@ -214,5 +225,18 @@ export interface SendRequest {
   readonly currentParentSessionId?: string
 }
 
+/**
+ * Name one prompt. The host asks the model first (a one-shot call on the default model) and
+ * falls back to the deterministic rule, so this never fails for want of a model.
+ */
+export interface SuggestNameRequest {
+  readonly kind: 'suggestName'
+  /** The prompt to name; must be non-empty after trimming. */
+  readonly text: string
+  /** The record being edited, so the answer does not de-duplicate against itself. */
+  readonly excludeId?: string
+}
+
 /** Every request this channel accepts. */
-export type ShortcutRequest = ListRequest | CreateRequest | UpdateRequest | RemoveRequest | SendRequest
+export type ShortcutRequest =
+  | ListRequest | CreateRequest | UpdateRequest | RemoveRequest | SendRequest | SuggestNameRequest

@@ -44,7 +44,10 @@ Then restart `dsh web` and refresh the page.
 1. Hover one of your messages and press **Add to shortcuts**, or open **Settings → Shortcuts** and
    press **Add shortcut**.
 2. Pick the target in the tree — press a session for its main agent, or expand it for a subagent or
-   team member — then fill in the content and confirm.
+   team member — then fill in the prompt and confirm. **Generate from prompt**, beside the name,
+   asks the model for a short title for that prompt and puts it in the name field (available once
+   the prompt has text; with no model configured, or on failure, it falls back to the prompt's
+   first line instead of getting stuck).
 3. Press that row in the sidebar menu: the message is sent to its target.
 
 ## Notes

@@ -195,6 +195,19 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(text).toHaveValue(CAPTURE_TEXT)
     await expect(confirm).toBeDisabled()
     await expect(page.locator('[role="dialog"][aria-modal="true"]')).toBeVisible()
+    // The message body is labelled as the PROMPT it is.
+    await expect(page.locator('[data-dsh-shortcut-prompt-label]')).toHaveText(/提示词|Prompt/)
+    // And the name can be derived from it: the action is live because the prompt has text.
+    const generate = page.locator('[data-dsh-shortcut-generate-name]')
+    await expect(generate).toBeEnabled()
+    await generate.click()
+    // This fixture has no model credentials, so the host cannot name. A refusal must write
+    // NOTHING — a quietly filled prefix is what makes "the model never ran" look like success —
+    // and the reader must be told why, in a toast that carries the host's own message.
+    await expect(name).toHaveValue('')
+    const refusal = page.getByText(/模型没能命名|model could not name/i).first()
+    await expect(refusal).toBeVisible()
+    await expect(refusal).toContainText(/API key|model runtime|no text|naming request/i)
     // The navigate switch exists, defaults to on, and explains itself.
     const navigate = page.locator('[data-dsh-shortcut-navigate]')
     await expect(navigate).toBeVisible()
@@ -571,6 +584,9 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await page.locator('[data-dsh-shortcut-settings-add]').click()
     const confirm = page.locator('[data-dsh-shortcut-confirm]')
     await expect(confirm).toBeDisabled()
+    // A dialog with no prompt has nothing to derive a name from, so that action is inert.
+    const generate = page.locator('[data-dsh-shortcut-generate-name]')
+    await expect(generate).toBeDisabled()
     await name.fill(MANUAL_NAME)
 
     // The target tree is inline in the dialog — there is no dropdown to open.
@@ -596,6 +612,9 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await expect(page.locator('[data-dsh-shortcut-target]')).toContainText('/')
 
     await page.locator('[data-dsh-shortcut-text]').fill(MANUAL_TEXT)
+    // Now there IS a prompt, so the derive action comes alive (it is not pressed here: the
+    // name above was typed by hand and must survive).
+    await expect(generate).toBeEnabled()
     await expect(confirm).toBeEnabled()
     await confirm.click()
     await expect(page.locator('[data-dsh-shortcut-row]')).toHaveCount(2, { timeout: 10_000 })
