@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1](https://github.com/9087/dsh-shortcut/compare/v0.4.0...v0.4.1) (2026-10-22)
+
+### Bug Fixes
+
+* keep the card title bridge headless-safe. ([a455022](https://github.com/9087/dsh-shortcut/commit/a45502235cdbaac6852c115b3a210e30229ad707))
+
 ## [0.4.0](https://github.com/9087/dsh-shortcut/compare/v0.3.1...v0.4.0) (2026-10-22)
 
 ### Features
