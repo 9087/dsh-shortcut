@@ -151,6 +151,8 @@ interface SubagentRuntimeSurface {
 interface StreamChunkLike {
   readonly type: string
   readonly text?: string
+  /** Block ordinal, used to tell whether a block already streamed deltas. */
+  readonly index?: number
   /** Present on `block-end`: the finished block, which may carry text when no deltas came. */
   readonly block?: unknown
   /** Present on `finish`: how the call ended, errors included. */
@@ -269,25 +271,53 @@ function blockTextOf(chunk: StreamChunkLike): string | undefined {
 }
 
 /**
- * The VISIBLE text one chunk carries, whatever field this host's adapter put it in.
+ * The visible text ONE DELTA carries, whatever field this host's adapter put it in.
  *
  * Only visible text: `reasoning-delta` carries the same `text` field as `text-delta`, so a
  * reader that ignores the type concatenates the model's own thinking into the answer — with
  * effort `high` that deliberation is most of what the model produces, and it would be cleaned
  * into a "name" that is really a sentence of reasoning. The tolerated shapes (`delta.text`,
- * `content.text`, a bare string) cost nothing and save a silent empty answer on a host that
- * spells the chunk differently; this is the single place that reads them.
- * @param chunk - one stream chunk.
- * @returns its visible text, or '' when it carries none.
+ * `content.text`) cost nothing and save a silent empty answer on a host that spells the chunk
+ * differently; this is the single place that reads them.
+ * @param chunk - one stream chunk that is not a block boundary.
+ * @returns its delta text, or '' when it carries none.
  */
-function visibleTextOf(chunk: StreamChunkLike): string {
-  if (chunk.type === 'reasoning-delta') return ''
+function deltaTextOf(chunk: StreamChunkLike): string {
+  if (chunk.type === 'reasoning-delta' || chunk.type === 'block-end' || chunk.type === 'block-start' || chunk.type === 'finish') return ''
   if (typeof chunk.text === 'string') return chunk.text
   const delta = chunk.delta as { text?: unknown } | undefined
   if (typeof delta === 'object' && delta !== null && typeof delta.text === 'string') return delta.text
   const content = chunk.content as { text?: unknown } | undefined
   if (typeof content === 'object' && content !== null && typeof content.text === 'string') return content.text
-  return chunk.type === 'block-end' ? blockTextOf(chunk) ?? '' : ''
+  return ''
+}
+
+/**
+ * Collect a stream's visible text WITHOUT counting the same block twice.
+ *
+ * The DeepSeek adapter streams `text-delta` for every content delta AND sends a `block-end`
+ * whose `block` holds that content block's FULL text once the block closes. Appending both
+ * doubles the answer — the generated title came back as "重启 dev 服务重启 dev 服务" — so a
+ * block's `block-end` text is only a FALLBACK, for an adapter that sends no deltas at all.
+ */
+function createTextCollector(): { add(chunk: StreamChunkLike): void; text(): string } {
+  /** Block indexes that already contributed delta text. */
+  const streamed = new Set<number>()
+  let text = ''
+  return {
+    add(chunk: StreamChunkLike): void {
+      const index = typeof chunk.index === 'number' ? chunk.index : -1
+      if (chunk.type === 'block-end') {
+        if (!streamed.has(index) && blockTextOf(chunk) !== undefined) text += blockTextOf(chunk) ?? ''
+        return
+      }
+      const delta = deltaTextOf(chunk)
+      if (delta.length === 0) return
+      text += delta
+      if (index >= 0) streamed.add(index)
+    },
+    text: () => text,
+  }
 }
 
 /** The failure message a `finish` chunk reports, when it reports one. */
@@ -338,7 +368,7 @@ async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Pro
   }, NAME_CALL_TIMEOUT_MS)
   try {
     const consume = (async (): Promise<NameAttempt> => {
-      let answer = ''
+      const collector = createTextCollector()
       for await (const chunk of llm.stream({
         provider: selection.provider,
         model: selection.model,
@@ -350,7 +380,7 @@ async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Pro
         reasoningEffort: 'off',
         signal: controller.signal,
       })) {
-        answer += visibleTextOf(chunk)
+        collector.add(chunk)
         // A failed call is a `finish` EVENT, not a thrown error: without this the caller would
         // read it as an empty answer and the reader would never learn the model was refused.
         const failure = chunk.type === 'finish' ? finishFailureOf(chunk) : undefined
@@ -359,6 +389,7 @@ async function modelNameOf(ctx: Context, text: string, signal: AbortSignal): Pro
           return { answer: '', note: failure }
         }
       }
+      const answer = collector.text()
       // The instruction pins the language, but a model that ignores it must not hand the
       // reader a title in the wrong language: that is a refusal, not a name.
       if (answer.trim().length > 0 && languageMismatch(text, answer)) {

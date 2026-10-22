@@ -454,6 +454,23 @@ describe('host naming', () => {
     expect((result.value as { name: string }).name).toContain('重启服务')
   })
 
+  it('never counts a block twice when the adapter streams deltas AND a full block', async () => {
+    // The DeepSeek adapter's real shape: a text-delta per content delta, then a block-end whose
+    // block holds that block's COMPLETE text. Reading both doubles the answer (which is exactly
+    // how a generated name came back as "重启 dev重启 dev").
+    const { call } = mount({
+      chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: '重启 ' },
+        { type: 'text-delta', index: 0, text: 'dev' },
+        { type: 'block-end', index: 0, block: { type: 'text', text: '重启 dev' } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ],
+    })
+    const result = await call('suggestName', { text: '重启服务：请重启 dev 服务' })
+    expect(result.value).toEqual({ name: '重启 dev', source: 'model' })
+  })
+
   it('reads the text from a finished block when the adapter sends no deltas', async () => {
     // Some providers stream no text deltas: the whole answer arrives in `block-end`.
     const { call } = mount({
