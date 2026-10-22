@@ -335,11 +335,29 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await item.click()
     await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
 
-    // The jump switch defaults to on, so delivery also OPENED the shortcut's
-    // session: its transcript holds the original message plus the delivered copy.
+    // The jump switch defaults to on, so delivery also OPENED the shortcut's session: its
+    // transcript holds the original message, and the delivery arrived as a TRIGGER CARD — the
+    // shell's own rendering for a message that woke an idle agent (the same card a scheduled
+    // reminder gets), never as a user bubble that pretends the reader typed it.
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionA}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toHaveCount(0)
-    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(2, { timeout: 30_000 })
+    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(1, { timeout: 30_000 })
+    const card = page.locator('[data-chat-flow-kind="turn-trigger"]')
+    await expect(card).toHaveCount(1, { timeout: 30_000 })
+    // The card is COLLAPSED by default, exactly like the shell's own trigger rows (a scheduled
+    // reminder included): the visible part is a titled notice, and the body opens on request.
+    // The shell titles an unknown source generically ("收到执行请求"); OUR bridge retitles the
+    // card from the delivery's source tag, so it names the record instead.
+    await expect(card).toHaveAttribute('data-dsh-shortcut-card', '', { timeout: 15_000 })
+    await expect(card).toContainText(new RegExp(`快捷方式|Shortcut`))
+    await expect(card).toContainText(SHORTCUT_NAME)
+    await expect(card).not.toContainText(/收到执行请求|Execution request/)
+    await expect(card.getByRole('button', { expanded: false })).toHaveCount(1)
+    await card.getByRole('button').first().click()
+    await expect(card.getByRole('button', { expanded: true })).toHaveCount(1)
+    // The body is the prompt itself: the card is the packaging, so no label rides in the message.
+    await expect(card).toContainText(CAPTURE_TEXT)
+    await expect(card).not.toContainText('〔快捷方式')
 
     // The session the reader was in received nothing.
     const secondRow = page.getByRole('treeitem').filter({ hasText: OTHER_PROBE }).first()
@@ -347,6 +365,7 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     await secondRow.click({ timeout: 20_000 })
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
     await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(1)
+    await expect(page.locator('[data-chat-flow-kind="turn-trigger"]')).toHaveCount(0)
   })
 
   test('3b. the menu groups by the session on screen, current first and the rest after', async () => {
@@ -491,12 +510,15 @@ test.describe('dsh-shortcut (real Chromium)', () => {
     expect(anyHeading!.y).toBeLessThan(anyRow!.y)
 
     // Triggering it delivers into B — the session on screen — not into A, where it came from.
+    // The delivery lands as a trigger card, so the BUBBLE count stays and the card count grows.
     const bubblesInB = await page.locator('[data-chat-flow-kind="user"]').count()
+    const cardsInB = await page.locator('[data-chat-flow-kind="turn-trigger"]').count()
     await page.getByRole('menuitem', { name: SHORTCUT_NAME }).click()
     await expect(page.getByText(SENT_BANNER)).toBeVisible({ timeout: 10_000 })
     // The jump switch is on, so it navigates to where it delivered — which is here.
     await expect(page.locator(`[data-dsh-shortcut-session="${sessionB}"]`)).toBeAttached({ timeout: 15_000 })
-    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(bubblesInB + 1, { timeout: 30_000 })
+    await expect(page.locator('[data-chat-flow-kind="user"]')).toHaveCount(bubblesInB, { timeout: 30_000 })
+    await expect(page.locator('[data-chat-flow-kind="turn-trigger"]')).toHaveCount(cardsInB + 1, { timeout: 30_000 })
 
     // Back off, and back into the ordinary grouping.
     await openEditor()

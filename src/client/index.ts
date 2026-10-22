@@ -19,6 +19,7 @@
 import { ShortcutApi } from './api.ts'
 import type { ClientRpc } from './api.ts'
 import { attachBubbleCapture } from './bubble-capture.ts'
+import { attachTriggerTitles } from './trigger-titles.ts'
 import { ShortcutFooterEntry } from './components/FooterEntry.tsx'
 import { ShortcutSessionSeat } from './components/SessionSeat.tsx'
 import { ShortcutSettingsSection } from './components/SettingsSection.tsx'
@@ -165,6 +166,10 @@ export function apply(ctx: ClientContextLike): void {
     t,
     onCapture: capture => { editorStore.openCapture(capture) },
   }), 'dsh-shortcut: bubble capture')
+
+  // A delivery wakes the agent, so the shell draws it as its own trigger card; this titles the
+  // card with the record it came from (only our own source is touched).
+  ctx.effect(() => attachTriggerTitles({ t }), 'dsh-shortcut: trigger card titles')
 
   // A new connection generation means the host may have restarted with a
   // different store state; re-read rather than showing a stale list.

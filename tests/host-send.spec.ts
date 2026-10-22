@@ -96,21 +96,46 @@ interface ModelCall {
   stop?: readonly string[]
 }
 
+/** What the fake wake-up path should do for one mount. */
+interface DeliveryOptions {
+  /** Refuse `resolveAgent` with this error instead of answering a live agent. */
+  resolveError?: { code: string; message: string }
+  /** Report that persistence did not acknowledge the delivery. */
+  flushFails?: boolean
+  /** Publish the prompt through `prompt` instead of the wake-up path (an older host). */
+  noWake?: boolean
+}
+
+/** One message published through the wake-up path. */
+interface FollowupRecord {
+  sessionId: string
+  message: {
+    id: string
+    role: string
+    content: readonly { type: string; text: string }[]
+    source: Record<string, unknown>
+  }
+}
+
 /**
  * Mount the plugin on a fake context and return a caller for its channel.
  *
  * The fake is deliberately thin: `apply` asks the context for the connection service (to
- * register the channel), per delivery for `sessionController` / `subagents`, and per naming
+ * register the channel), per delivery for `sessionController` + `sessions`, and per naming
  * request for `llm` + `agentDefaultModel`. Everything else it touches is the logger.
  */
-function mount(model: ModelOptions = {}): {
+function mount(model: ModelOptions = {}, delivery: DeliveryOptions = {}): {
   call: (endpoint: string, payload: unknown) => Promise<HandlerResult>
   prompts: PromptRequest[]
   childPrompts: ChildPromptRequest[]
+  followups: FollowupRecord[]
+  flushed: string[]
   modelCalls: ModelCall[]
 } {
   const prompts: PromptRequest[] = []
   const childPrompts: ChildPromptRequest[] = []
+  const followups: FollowupRecord[] = []
+  const flushed: string[] = []
   const modelCalls: ModelCall[] = []
   let handler: Handler | undefined
   const ctx = {
@@ -128,10 +153,30 @@ function mount(model: ModelOptions = {}): {
         }
       }
       if (name === 'sessionController') {
-        return {
+        const controller: Record<string, unknown> = {
           prompt: async (request: PromptRequest) => {
             prompts.push(request)
             return { accepted: true }
+          },
+        }
+        if (delivery.noWake !== true) {
+          controller['resolveAgent'] = async (sessionId: string) => {
+            if (delivery.resolveError !== undefined) return { error: delivery.resolveError }
+            return {
+              agent: {
+                session: { id: sessionId },
+                followup: (message: FollowupRecord['message']) => { followups.push({ sessionId, message }) },
+              },
+            }
+          }
+        }
+        return controller
+      }
+      if (name === 'sessions') {
+        return {
+          flush: async (session: { id?: string }) => {
+            flushed.push(session.id ?? '')
+            return delivery.flushFails !== true
           },
         }
       }
@@ -170,6 +215,8 @@ function mount(model: ModelOptions = {}): {
   return {
     prompts,
     childPrompts,
+    followups,
+    flushed,
     modelCalls,
     call: (endpoint, payload) => handler!(endpoint, payload, new AbortController().signal, {}),
   }
@@ -197,31 +244,79 @@ describe('host delivery routing', () => {
   })
 
   it('sends a bound record to its stored session, ignoring the caller\'s shown session', async () => {
-    const { call, prompts } = mount()
+    const { call, followups } = mount()
     const entry = await create(call, { name: 'bound' })
     const result = await call('send', { id: entry.id, currentSessionId: 'session-shown' })
     expect(result.ok).toBe(true)
-    expect(prompts.map(request => request.sessionId)).toEqual(['session-stored'])
+    expect(followups.map(record => record.sessionId)).toEqual(['session-stored'])
     // The receipt names where it really went, so a client that navigates follows it there.
     expect((result.value as { entry: { sessionId: string } }).entry.sessionId).toBe('session-stored')
   })
 
+  it('publishes the delivery on the live agent, tagged so the shell draws a trigger card', async () => {
+    // The wake-up path is what makes the shell render a trigger card instead of a user bubble:
+    // a message that wakes an idle agent is a `turn-trigger`, and its title comes from the tag.
+    const { call, followups, flushed } = mount()
+    const entry = await create(call, { name: '部署到测试环境' })
+    await call('send', { id: entry.id })
+    expect(followups).toHaveLength(1)
+    const [record] = followups
+    expect(record?.message.role).toBe('user')
+    expect(record?.message.id.length ?? 0).toBeGreaterThan(0)
+    // The record's name labels the message, and the prompt itself is delivered verbatim.
+    expect(record?.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(record?.message.source).toEqual({
+      kind: 'shortcut',
+      shortcutId: entry.id,
+      shortcutName: '部署到测试环境',
+    })
+    // The delivery is only accepted once persistence acknowledges it.
+    expect(flushed).toEqual(['session-stored'])
+  })
+
   it('sends an any-session record to the caller\'s shown session', async () => {
-    const { call, prompts } = mount()
+    const { call, followups } = mount()
     const entry = await create(call, { name: 'anywhere', anySession: true })
     const result = await call('send', { id: entry.id, currentSessionId: 'session-shown' })
     expect(result.ok).toBe(true)
-    expect(prompts.map(request => request.sessionId)).toEqual(['session-shown'])
-    expect(prompts[0]?.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(followups.map(record => record.sessionId)).toEqual(['session-shown'])
     // Delivered to that session's own agent, not to whatever agent the record was saved at.
     expect((result.value as { entry: { sessionId: string; target: { kind: string } } }).entry)
       .toMatchObject({ sessionId: 'session-shown', target: { kind: 'main' } })
   })
 
+  it('classifies a refusal to resolve the agent like any other delivery failure', async () => {
+    const { call, followups } = mount({}, { resolveError: { code: 'session/not-found', message: 'no such session' } })
+    const entry = await create(call, { name: 'bound' })
+    const result = await call('send', { id: entry.id })
+    expect(result.error?.code).toBe('session-not-found')
+    expect(followups).toEqual([])
+  })
+
+  it('reports a delivery the host refuses to persist', async () => {
+    const { call } = mount({}, { flushFails: true })
+    const entry = await create(call, { name: 'bound' })
+    const result = await call('send', { id: entry.id })
+    expect(result.error?.code).toBe('send-failed')
+  })
+
+  it('still delivers through `prompt` on a host without the wake-up verb', async () => {
+    // An older host cannot render the trigger card; it must still receive the message.
+    const { call, prompts, followups } = mount({}, { noWake: true })
+    const entry = await create(call, { name: 'bound' })
+    const result = await call('send', { id: entry.id })
+    expect(result.ok).toBe(true)
+    expect(followups).toEqual([])
+    expect(prompts[0]).toMatchObject({
+      sessionId: 'session-stored',
+      content: [{ type: 'text', text: 'hello' }],
+    })
+  })
+
   it('delivers to the CHILD when the open conversation is a subagent, not to its main agent', async () => {
     // The shell can open a subagent as its own conversation; that child is not reachable
     // through the session controller, so the delivery must take the subagent runtime.
-    const { call, prompts, childPrompts } = mount()
+    const { call, followups, childPrompts } = mount()
     const entry = await create(call, { name: 'anywhere', anySession: true })
     const result = await call('send', {
       id: entry.id,
@@ -229,7 +324,7 @@ describe('host delivery routing', () => {
       currentParentSessionId: 'session-parent',
     })
     expect(result.ok).toBe(true)
-    expect(prompts).toEqual([])
+    expect(followups).toEqual([])
     expect(childPrompts).toHaveLength(1)
     expect(childPrompts[0]).toMatchObject({
       parentSessionId: 'session-parent',
@@ -249,7 +344,7 @@ describe('host delivery routing', () => {
 
   it('still sends a BOUND record to its stored session when the open conversation is a child', async () => {
     // The parent field rides along on every send; a bound record must ignore it entirely.
-    const { call, prompts, childPrompts } = mount()
+    const { call, followups, childPrompts } = mount()
     const entry = await create(call, { name: 'bound' })
     const result = await call('send', {
       id: entry.id,
@@ -257,7 +352,7 @@ describe('host delivery routing', () => {
       currentParentSessionId: 'session-parent',
     })
     expect(result.ok).toBe(true)
-    expect(prompts.map(request => request.sessionId)).toEqual(['session-stored'])
+    expect(followups.map(record => record.sessionId)).toEqual(['session-stored'])
     expect(childPrompts).toEqual([])
   })
 

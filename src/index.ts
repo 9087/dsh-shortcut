@@ -98,9 +98,38 @@ interface PromptRequestLike {
   readonly content: readonly { readonly type: 'text'; readonly text: string }[]
 }
 
+/** One user message as the wake-up path publishes it. */
+interface UserMessageLike {
+  readonly id: string
+  readonly role: 'user'
+  readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+  /**
+   * Where the message came from. The shell renders a message that WOKE an idle agent as a
+   * trigger card instead of a user bubble, and takes that card's title and icon from this
+   * kind — an unknown kind gets the generic "execution request received" card.
+   */
+  readonly source: Record<string, unknown>
+}
+
+/** One live agent, narrowed to the verb a delivery needs. */
+interface AgentLike {
+  readonly session: unknown
+  followup(message: UserMessageLike): void
+}
+
 /** The one verb this plugin uses from the host session business API. */
 interface SessionControllerSurface {
   prompt(request: PromptRequestLike, signal: AbortSignal): Promise<{ accepted: true }>
+  /**
+   * Resolve a session to its live agent, the way the host's own reminders do. Present on the
+   * hosts this plugin targets; the `prompt` path stays as the fallback when it is not.
+   */
+  resolveAgent?(sessionId: string): Promise<{ readonly agent: AgentLike } | { readonly error: unknown }>
+}
+
+/** The persistence verb the wake-up path owes after a followup. */
+interface SessionsSurface {
+  flush(session: unknown): Promise<boolean>
 }
 
 /** One browser-authored message to a continuable direct child, as the subagent runtime takes it. */
@@ -486,6 +515,20 @@ function sendFailure(error: unknown): { code: ShortcutErrorCode; message: string
 }
 
 /**
+ * The source tag a delivered message carries.
+ *
+ * The shell renders a message that WOKE an idle agent as a trigger card, and takes that card's
+ * title and icon from this kind. `shortcut` is not one the shell knows, so the card falls back
+ * to its generic "execution request received" title — the client bridge then retitles exactly
+ * those cards with the record's name (it reads the tag from the published chat snapshot). The
+ * prompt itself is delivered verbatim: the card is the packaging, not the message.
+ * @param entry - the record being delivered.
+ */
+function deliverySourceOf(entry: { readonly id: string; readonly name: string }): Record<string, unknown> {
+  return { kind: 'shortcut', shortcutId: entry.id, shortcutName: entry.name }
+}
+
+/**
  * Mount the shortcut store and its RPC channel.
  * @param ctx - host context carrying the connection, session and subagent services.
  */
@@ -549,19 +592,44 @@ export function apply(ctx: Context): void {
         : { sessionId: current.parentSessionId, target: { kind: 'subagent', childSessionId: current.sessionId } }
       : { sessionId: entry.sessionId, target: entry.target }
     const { sessionId, target } = address
+    // The prompt is delivered verbatim: the card is the packaging, not the message.
     const text = entry.text
     try {
       if (target.kind === 'main') {
         const controller = ctx.get('sessionController') as SessionControllerSurface | undefined
-        if (controller === undefined || typeof controller.prompt !== 'function') {
+        if (controller === undefined) {
           return fail('send-failed', 'the host session service is unavailable')
         }
-        await controller.prompt({
-          requestId: randomUUID(),
-          sessionId,
-          mode: 'queue',
-          content: [{ type: 'text', text }],
-        }, signal)
+        if (typeof controller.resolveAgent === 'function') {
+          // The native WAKE-UP path (the one the host's own reminders use): publish a user
+          // message on the live agent and let the loop wake. A message that wakes an idle agent
+          // is rendered as a trigger card instead of a user bubble, which is the whole point of
+          // tagging the source and delivering this way.
+          const resolved = await controller.resolveAgent(sessionId)
+          if ('error' in resolved) throw resolved.error
+          resolved.agent.followup({
+            id: randomUUID(),
+            role: 'user',
+            content: [{ type: 'text', text }],
+            source: deliverySourceOf(entry),
+          })
+          const sessions = ctx.get('sessions') as SessionsSurface | undefined
+          if (sessions !== undefined && typeof sessions.flush === 'function') {
+            if (!await sessions.flush(resolved.agent.session)) {
+              throw Object.assign(new Error('the host did not persist the delivery'), { code: 'session/write-failed' })
+            }
+          }
+        } else if (typeof controller.prompt === 'function') {
+          // A host without the wake-up verb still delivers; it just renders as a user bubble.
+          await controller.prompt({
+            requestId: randomUUID(),
+            sessionId,
+            mode: 'queue',
+            content: [{ type: 'text', text }],
+          }, signal)
+        } else {
+          return fail('send-failed', 'the host session service offers no delivery verb')
+        }
       } else {
         const childSessionId = target.childSessionId
         if (childSessionId === undefined || childSessionId.length === 0) {

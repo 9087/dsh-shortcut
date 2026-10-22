@@ -37,6 +37,8 @@ let currentSessionId: string | undefined
 let currentSnapshot: unknown
 /** `data-chat-node-key` → user message text. */
 let texts = new Map<string, string>()
+/** `data-chat-node-key` → the shortcut a delivered trigger card came from. */
+let cardNames = new Map<string, string>()
 /** Bumped on every committed publish; React readers subscribe to it. */
 let revision = 0
 const listeners = new Set<() => void>()
@@ -105,6 +107,27 @@ function buildTexts(snapshot: unknown): Map<string, string> {
 }
 
 /**
+ * Build the key → shortcut-name map from one chat snapshot.
+ *
+ * A delivered shortcut is a `turn-trigger` node whose message source is ours, so the DOM card
+ * can be titled with the record it came from — the join is the node key the shell already puts
+ * on the card. Only our own source is collected, so other wake sources (a scheduled reminder,
+ * a goal, a webhook) keep the shell's own title.
+ */
+function buildCardNames(snapshot: unknown): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const node of nodesOf(snapshot)) {
+    const row = recordOf(node) as ChatNodeLike | undefined
+    if (row === undefined || typeof row.key !== 'string') continue
+    const source = recordOf(recordOf(row.data)?.source)
+    if (source?.kind !== 'shortcut') continue
+    const name = source.shortcutName
+    if (typeof name === 'string' && name.length > 0) names.set(row.key, name)
+  }
+  return names
+}
+
+/**
  * Publish the shown session and its message texts.
  * @param sessionId - the session the seat belongs to, when the shell named one.
  * @param snapshot - the chat snapshot handed to the seat.
@@ -114,6 +137,7 @@ export function publishSeat(sessionId: string | undefined, snapshot: unknown): v
   currentSessionId = sessionId
   currentSnapshot = snapshot
   texts = buildTexts(snapshot)
+  cardNames = buildCardNames(snapshot)
   notify()
 }
 
@@ -126,6 +150,7 @@ export function unpublishSeat(snapshot: unknown): void {
   currentSessionId = undefined
   currentSnapshot = undefined
   texts = new Map()
+  cardNames = new Map()
   notify()
 }
 
@@ -137,6 +162,15 @@ export function publishedSessionId(): string | undefined {
 /** The text of one user message, as last published. */
 export function publishedText(nodeKey: string): string | undefined {
   return texts.get(nodeKey)
+}
+
+/**
+ * The shortcut a delivered trigger card came from, as last published.
+ * @param nodeKey - the card's `data-chat-node-key`.
+ * @returns the record name, or undefined for any other wake source.
+ */
+export function publishedCardName(nodeKey: string): string | undefined {
+  return cardNames.get(nodeKey)
 }
 
 /**
@@ -153,6 +187,19 @@ export function scrapeBubbleText(flow: Element): string {
   for (const actions of clone.querySelectorAll('[data-clock]')) actions.remove()
   for (const button of clone.querySelectorAll('button')) button.remove()
   return (clone.textContent ?? '').trim()
+}
+
+/**
+ * Subscribe to bridge publishes outside React.
+ *
+ * A published snapshot is not a DOM change, so a DOM-only observer never learns that a card
+ * can now be titled: the bridge has to wake its readers itself.
+ * @param listener - called after every committed publish or withdrawal.
+ * @returns the unsubscribe function.
+ */
+export function subscribeBridge(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
 }
 
 /** Subscribe React to bridge publishes. */
