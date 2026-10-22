@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/9087/dsh-shortcut/compare/v0.3.1...v0.4.0) (2026-10-22)
+
+### Features
+
+* deliver a shortcut as the shell's waking card, titled with its record. ([ac5c523](https://github.com/9087/dsh-shortcut/commit/ac5c52370f31735b3161538b3357064ba4b78d4b))
+* name a shortcut from its prompt with the default model. ([399b4c5](https://github.com/9087/dsh-shortcut/commit/399b4c550eef38eb24ed08ad0e1dc5df829e4b73))
+
+### Bug Fixes
+
+* drop the text length cap, matching the host reminder prompt rule. ([d392176](https://github.com/9087/dsh-shortcut/commit/d3921765379fd705a13a1659d1293a26fa64ee59))
+* make the generated name formal, and keep it in the prompt's language. ([d8fae49](https://github.com/9087/dsh-shortcut/commit/d8fae49a2d6e26d6996fd84f4ef84b64ee1168b2))
+* stop the model answer being counted twice when naming. ([da49245](https://github.com/9087/dsh-shortcut/commit/da492451bb508422bc6932ed62c45cb38ddd96d1))
+
 ## [0.3.1](https://github.com/9087/dsh-shortcut/compare/v0.3.0...v0.3.1) (2026-10-19)
 
 ### Bug Fixes
